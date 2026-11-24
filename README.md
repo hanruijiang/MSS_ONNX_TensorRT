@@ -1,6 +1,6 @@
-# MSS ONNX / TensorRT — Vocal separation
+# MSS ONNX — Vocal separation
 
-Vocal separation inference and deployment with PyTorch, ONNX Runtime and TensorRT. The accelerated backends execute the neural network core; STFT, mask application and iSTFT run in PyTorch. Existing ONNX graphs and TensorRT engines require no checkpoint or model architecture dependencies.
+Vocal separation inference with ONNX Runtime (CPU or CUDA). ONNX Runtime executes the neural network core; STFT, mask application and iSTFT run in PyTorch. Existing ONNX graphs require no checkpoint or model architecture dependencies. PyTorch model definitions are retained for checkpoint-to-ONNX export.
 
 ## Models
 
@@ -20,25 +20,24 @@ Python 3.10+; first install PyTorch for your CPU/CUDA platform.
 pip install -r requirements-onnx.txt  # CPU ONNX Runtime
 # OR for CUDA (do not install both ORT packages):
 pip install -r requirements.txt onnxruntime-gpu
-# For TensorRT: install the matching NVIDIA TensorRT 10.x Python package.
 # For checkpoint-to-ONNX export with CPU ORT validation:
 pip install -r requirements-export.txt
 # OR, if using GPU ORT instead:
 pip install -r requirements.txt "onnx>=1.16" onnxruntime-gpu
 ```
 
-For PyTorch checkpoint inference or ONNX export, additionally install **only** the selected model's architecture dependencies:
+For ONNX export, additionally install **only** the selected model's architecture dependencies:
 
-| Model | Extra packages for PyTorch checkpoint inference or export |
+| Model | Extra packages for ONNX export |
 |---|---|
 | MDX23C | None |
 | Segm Models | `pip install segmentation-models-pytorch==0.3.3` |
 | BS Roformer / MelBand Roformer | `pip install rotary-embedding-torch==0.3.5` |
 | BS PolarFormer | None |
 
-For PolarFormer ONNX export, install `onnxscript` for the Dynamo exporter. Segm Models installs `timm==0.9.2` and torchvision through its pinned architecture dependency; use torchvision compatible with PyTorch. Existing ONNX graphs and TensorRT engines do not require model extras.
+For PolarFormer ONNX export, install `onnxscript` for the Dynamo exporter. Segm Models installs `timm==0.9.2` and torchvision through its pinned architecture dependency; use torchvision compatible with PyTorch. Existing ONNX graphs do not require model extras.
 
-For CUDA, ensure PyTorch, CUDA, cuDNN, ONNX Runtime and TensorRT are compatible. TensorRT engines are device/runtime specific. See [backend guide](docs/inference.md).
+For CUDA, ensure PyTorch, CUDA, cuDNN and ONNX Runtime are compatible. See the [inference guide](docs/inference.md).
 
 ## Inference
 
@@ -51,25 +50,10 @@ curl -L --fail https://huggingface.co/bgkb/bs_polarformer/resolve/main/bs_polarf
 python inference.py --model_type bs_polarformer \
   --config_path configs/model_bs_polarformer_float16.yaml \
   --input_folder input --store_dir outputs --extract_instrumental \
-  --use_onnx --onnx_model_path weights/bs_polarformer.onnx --force_cpu
+  --onnx_model_path weights/bs_polarformer.onnx --force_cpu
 ```
 
-## TensorRT export and inference
-
-Build an engine on the target GPU, then run:
-
-```bash
-python export_to_tensorrt.py --model_type bs_polarformer \
-  --config_path configs/model_bs_polarformer_float16.yaml \
-  --onnx_path weights/bs_polarformer.onnx --output_path weights/bs_polarformer.engine --fp16
-
-python inference.py --model_type bs_polarformer \
-  --config_path configs/model_bs_polarformer_float16.yaml \
-  --input_folder input --store_dir outputs --extract_instrumental \
-  --use_tensorrt --tensorrt_model_path weights/bs_polarformer.engine
-```
-
-For other models substitute the preset, model type and exported ONNX/engine path.
+For other models substitute the preset, model type and ONNX path. Omit `--force_cpu` to use CUDA when available. `--onnx_model_path` is required; no backend selection flag is needed.
 
 ## ONNX export
 
@@ -82,16 +66,7 @@ python export_to_onnx.py --model_type bs_roformer \
 
 PolarFormer defaults to opset 18; other models default to opset 17. Export loads the checkpoint strictly and compares the output with ONNX Runtime.
 
-## PyTorch inference
-
-```bash
-python inference.py --model_type bs_roformer \
-  --config_path configs/viperx/model_bs_roformer_ep_317_sdr_12.9755.yaml \
-  --start_check_point weights/model_bs_roformer_ep_317_sdr_12.9755.ckpt \
-  --input_folder input --store_dir outputs --extract_instrumental --device_id 0
-```
-
-Use `--use_compile` to compile the neural network core. See [backend guide](docs/inference.md) for chunk and batch settings, precision, audio output and tensor shapes.
+See the [inference guide](docs/inference.md) for chunk and batch settings, precision, audio output and tensor shapes.
 
 ## Tests
 
@@ -99,7 +74,7 @@ Use `--use_compile` to compile the neural network core. See [backend guide](docs
 python -m unittest discover -s tests -v
 ```
 
-The tests cover configuration loading, PolarFormer feature ordering, complex mask reconstruction, DC handling and short/partial chunks.
+The tests cover configuration loading, PolarFormer feature ordering, complex mask reconstruction, DC handling and short/partial chunks, ONNX argument validation and fixed/dynamic batch handling.
 
 ## Credits
 

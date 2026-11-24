@@ -10,6 +10,4 @@ weights/
 *.pt
 *.onnx
 *.onnx.data
-*.engine
-*.plan
 .ipynb_checkpoints/

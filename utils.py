@@ -27,14 +27,11 @@ def inference_batch_size(config, model):
     batch = int(config.inference.batch_size)
     if batch < 1:
         raise ValueError('batch_size must be positive')
-    fixed = getattr(model, 'fixed_batch', None)
-    minimum = getattr(model, 'min_batch', 1)
-    maximum = getattr(model, 'max_batch', None)
-    return fixed or max(minimum, min(batch, maximum or batch))
+    return getattr(model, 'fixed_batch', None) or batch
 
 
 def load_core(model_type, config, checkpoint):
-    """Load only the neural network; no checkpoint is needed for ONNX/TRT."""
+    """Load the neural network checkpoint for ONNX export."""
     params = dict(config.model)
     if model_type == 'mdx23c':
         from models_without_stft.mdx23c_tfc_tdf_v3_no_stft import TFC_TDF_net
@@ -124,7 +121,6 @@ def demix(config, model, mix, device, model_type, pbar=False):
         raise ValueError('Invalid num_overlap')
     batch = inference_batch_size(config, model)
     fixed_batch = getattr(model, 'fixed_batch', None)
-    min_batch = getattr(model, 'min_batch', 1)
     mix = torch.as_tensor(mix, dtype=torch.float32, device='cpu')
     if mix.ndim != 2 or mix.shape[0] != 2 or mix.shape[1] == 0:
         raise ValueError('Expected nonempty stereo audio (2, samples)')
@@ -164,9 +160,8 @@ def demix(config, model, mix, device, model_type, pbar=False):
             elif pad:
                 part = torch.nn.functional.pad(part, (0, pad))
             chunks.append(part)
-        required_batch = fixed_batch or min_batch
-        if len(chunks) < required_batch:
-            chunks += [torch.zeros_like(chunks[0])] * (required_batch-len(chunks))
+        if fixed_batch is not None and len(chunks) < fixed_batch:
+            chunks += [torch.zeros_like(chunks[0])] * (fixed_batch-len(chunks))
         x = processor.stft(torch.stack(chunks).to(device))
         y = processor.istft(model(x)).float().cpu()
         if y.shape != (len(chunks), len(names), 2, size):
