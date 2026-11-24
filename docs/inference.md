@@ -11,6 +11,10 @@ All presets use 44.1 kHz stereo. Mono input is duplicated to stereo. Outputs pre
 
 PolarFormer uses 2048 FFT/window, 512 hop, periodic Hann, centered STFT, unnormalized, frequency-major stereo interleaving. The complex mask multiplies the original spectrum; DC is zeroed in each channel before iSTFT with explicit waveform length. `audio.hop_length` and `audio.dim_t` from training configs are not used for this model. The official inference chunk is 882000 samples (1723 frames), overlap 2; default batch 1 here to limit memory. The FP16-weight Hugging Face graph keeps FP32 external IO; it is not a true FP16 compute engine.
 
+## Dependencies
+
+The common requirements are used by the shared audio/configuration pipeline. Existing ONNX graphs need only the common requirements and exactly one ONNX Runtime distribution (CPU or GPU). TensorRT build/inference needs the common requirements plus a compatible TensorRT 10.x installation, without ONNX Runtime or the Python ONNX package. For checkpoint inference/export, install only the selected model extra described in the [README](../README.md). The Python ONNX package is needed for checkpoint export/checking, and ONNX Script only for the PolarFormer Dynamo export path. Model architecture imports are lazy; beartype and an explicit timm dependency are not needed.
+
 ## Runtime selection
 
 - `--use_onnx --onnx_model_path ...`: uses CPU or CUDA Execution Provider. No checkpoint/model construction.

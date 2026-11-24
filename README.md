@@ -21,9 +21,22 @@ pip install -r requirements-onnx.txt  # CPU ONNX Runtime
 # OR for CUDA (do not install both ORT packages):
 pip install -r requirements.txt onnxruntime-gpu
 # For TensorRT: install the matching NVIDIA TensorRT 10.x Python package.
-# For checkpoint export/PyTorch architectures:
+# For checkpoint-to-ONNX export with CPU ORT validation:
 pip install -r requirements-export.txt
+# OR, if using GPU ORT instead:
+pip install -r requirements.txt "onnx>=1.16" onnxruntime-gpu
 ```
+
+For PyTorch checkpoint inference or ONNX export, additionally install **only** the selected model's architecture dependencies:
+
+| Model | Extra packages for PyTorch checkpoint inference or export |
+|---|---|
+| MDX23C | None |
+| Segm Models | `pip install segmentation-models-pytorch==0.3.3` |
+| BS Roformer / MelBand Roformer | `pip install rotary-embedding-torch==0.3.5` |
+| BS PolarFormer | `pip install PoPE-pytorch` |
+
+For PolarFormer checkpoint-to-ONNX export, also run `pip install onnxscript` (the Dynamo exporter requires it). It is not needed for checkpoint inference or loading an existing ONNX graph. Segm Models 0.3.3 installs its own pinned `timm==0.9.2` and torchvision dependencies; use a torchvision build compatible with your PyTorch. To export all five presets, install all three model extras plus onnxscript. No model extras are needed to run existing ONNX graphs or build/run TensorRT engines.
 
 For CUDA, ensure PyTorch, CUDA, cuDNN, ONNX Runtime and TensorRT are compatible. TensorRT engines are device/runtime specific. See [backend guide](docs/inference.md).
 

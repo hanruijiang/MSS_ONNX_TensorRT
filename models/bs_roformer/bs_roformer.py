@@ -328,7 +328,7 @@ class BSRoformer(Module):
             except ModuleNotFoundError as exc:
                 if exc.name != 'PoPE_pytorch':
                     raise
-                raise ImportError('BS PolarFormer requires PoPE-pytorch; install .[bs_polarformer]') from exc
+                raise ImportError('BS PolarFormer requires PoPE-pytorch; install PoPE-pytorch') from exc
             time_pope_embed = PoPE(dim=dim_head, heads=heads)
             freq_pope_embed = PoPE(dim=dim_head, heads=heads)
             time_rotary_embed = None
