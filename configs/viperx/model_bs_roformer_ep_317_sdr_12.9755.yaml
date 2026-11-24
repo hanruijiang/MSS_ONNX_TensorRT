@@ -79,7 +79,6 @@ model:
   heads: 8
   attn_dropout: 0.1
   ff_dropout: 0.1
-  flash_attn: true
   dim_freqs_in: 1025
   stft_n_fft: 2048
   stft_hop_length: 441
@@ -92,7 +91,6 @@ training:
   - vocals
   - other
   target_instrument: vocals
-  use_amp: true # enable or disable usage of mixed precision (float16) - usually it must be true
 
 inference:
   batch_size: 4

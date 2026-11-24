@@ -36,7 +36,7 @@ For PyTorch checkpoint inference or ONNX export, additionally install **only** t
 | BS Roformer / MelBand Roformer | `pip install rotary-embedding-torch==0.3.5` |
 | BS PolarFormer | `pip install PoPE-pytorch` |
 
-For PolarFormer checkpoint-to-ONNX export, also run `pip install onnxscript` (the Dynamo exporter requires it). It is not needed for checkpoint inference or loading an existing ONNX graph. Segm Models 0.3.3 installs its own pinned `timm==0.9.2` and torchvision dependencies; use a torchvision build compatible with your PyTorch. To export all five presets, install all three model extras plus onnxscript. No model extras are needed to run existing ONNX graphs or build/run TensorRT engines.
+For PolarFormer checkpoint-to-ONNX export, also run `pip install onnxscript` (the Dynamo exporter requires it). It is not needed for checkpoint inference or loading an existing ONNX graph. Segm Models 0.3.3 installs its own pinned `timm==0.9.2` and torchvision dependencies; use a torchvision build compatible with your PyTorch. To export all five presets, install all three model extras plus onnxscript. No model extras are needed to run existing ONNX graphs or build/run TensorRT engines. PoPE-pytorch must expose the checkpoint-compatible `PoPE.inv_freqs` and `PoPE.bias` attributes. Use mutually compatible PyTorch, ONNX, ONNX Script and ORT versions; no unverified version pins are implied.
 
 For CUDA, ensure PyTorch, CUDA, cuDNN, ONNX Runtime and TensorRT are compatible. TensorRT engines are device/runtime specific. See [backend guide](docs/inference.md).
 
@@ -78,7 +78,7 @@ python export_to_onnx.py --model_type bs_roformer \
   --output_path weights/bs_roformer.onnx --force_cpu
 ```
 
-PolarFormer uses the upstream PoPE-aware architecture and the ONNX-compatible attention/core adapter from bgkb, opset 18; other models default to opset 17. Export uses strict checkpoint loading and compares the core output with ONNX Runtime. Only load trusted checkpoints. A prebuilt ONNX is sufficient for accelerated inference.
+BS Roformer and BS PolarFormer share one spectral core; PolarFormer loads the original PoPE checkpoint strictly before replacing only PoPE attention with the ONNX-compatible implementation adapted from bgkb. PolarFormer defaults to opset 18; other models default to opset 17. Export uses strict checkpoint loading and compares the core output with ONNX Runtime. Only load trusted checkpoints. A prebuilt ONNX is sufficient for accelerated inference.
 
 ## Tests and validation
 

@@ -25,20 +25,47 @@ class TensorRTBackend:
         if len(ins) != 1 or len(outs) != 1:
             raise ValueError('Expected one spectral input and one output')
         self.input, self.output = ins[0], outs[0]
-        shape = tuple(self.engine.get_tensor_shape(self.input))
-        self.fixed_batch = shape[0] if shape[0] > 0 else None
+        for name in (self.input, self.output):
+            self.dtype(name)
+            if self.engine.get_tensor_location(name) != trt.TensorLocation.DEVICE:
+                raise ValueError('Expected device-resident TensorRT IO')
+            if self.engine.get_tensor_format(name) != trt.TensorFormat.LINEAR:
+                raise ValueError('Expected linear TensorRT IO format')
+        self.input_shape = tuple(self.engine.get_tensor_shape(self.input))
+        if not self.input_shape:
+            raise ValueError('Expected a batched spectral input')
+        self.fixed_batch = self.input_shape[0] if self.input_shape[0] > 0 else None
+        self.min_batch = self.fixed_batch or 1
         self.max_batch = self.fixed_batch
-        if any(d < 0 for d in shape):
+        self.profile = None
+        if any(d < 0 for d in self.input_shape):
             lo, _, hi = self.engine.get_tensor_profile_shape(self.input, 0)
-            self.max_batch = int(hi[0])
-            if lo[0] == hi[0]:
-                self.fixed_batch = int(lo[0])
+            self.profile = (tuple(lo), tuple(hi))
+            self.min_batch, self.max_batch = int(lo[0]), int(hi[0])
+            if self.min_batch == self.max_batch:
+                self.fixed_batch = self.min_batch
+
+    def validate_shape(self, shape):
+        if len(shape) != len(self.input_shape) or any(
+            expected >= 0 and actual != expected
+            for actual, expected in zip(shape, self.input_shape)
+        ):
+            raise ValueError(f'TensorRT input shape {shape} does not match {self.input_shape}')
+        if self.profile is not None:
+            lo, hi = self.profile
+            if any(not a <= x <= b for x, a, b in zip(shape, lo, hi)):
+                raise ValueError(f'Input shape {shape} is outside TensorRT profile {lo}..{hi}')
 
     def dtype(self, name):
         trt = self.trt
-        return {trt.float32: torch.float32, trt.float16: torch.float16}[self.engine.get_tensor_dtype(name)]
+        dtypes = {trt.float32: torch.float32, trt.float16: torch.float16}
+        dtype = self.engine.get_tensor_dtype(name)
+        if dtype not in dtypes:
+            raise ValueError(f'Unsupported TensorRT dtype for {name}: {dtype}')
+        return dtypes[dtype]
 
     def __call__(self, x):
+        self.validate_shape(tuple(x.shape))
         x = x.to(device=self.device, dtype=self.dtype(self.input)).contiguous()
         if not self.context.set_input_shape(self.input, tuple(x.shape)):
             raise ValueError(f'Input shape {tuple(x.shape)} is outside the TensorRT profile')

@@ -36,12 +36,14 @@ class RoformerProcessor:
         self.kwargs = dict(n_fft=m.stft_n_fft, hop_length=m.stft_hop_length,
                            win_length=m.stft_win_length, normalized=m.get('stft_normalized', False))
         self.channels = 2 if m.stereo else 1
-        self.zero_dc = model_type == 'bs_polarformer'
+        self.zero_dc = m.get('zero_dc', True)
         self.mel = model_type == 'mel_band_roformer'
         if self.mel:
             bank = torch.from_numpy(filters.mel(sr=m.sample_rate, n_fft=m.stft_n_fft, n_mels=m.num_bands))
             bank[0, 0] = bank[-1, -1] = 1.
             covered = bank > 0
+            if not covered.any(dim=0).all():
+                raise ValueError('Mel bands must cover all frequency bins')
             self.indices = covered.nonzero(as_tuple=True)[1].repeat_interleave(self.channels)*self.channels
             self.indices += torch.arange(self.channels).repeat(self.indices.numel()//self.channels)
             self.counts = covered.sum(0).repeat_interleave(self.channels).clamp_min(1)
@@ -81,3 +83,22 @@ def make_processor(config, model_type):
     if model_type in ('mdx23c', 'segm_models'):
         return STFT(config.audio)
     raise ValueError(f'Unknown model type: {model_type}')
+
+
+def spectral_input_shape(config, model_type, size, batch=1):
+    """Compute the centered-STFT input shape without a dummy waveform."""
+    processor = make_processor(config, model_type)
+    if isinstance(processor, STFT):
+        n_fft, hop = processor.n_fft, processor.hop
+    else:
+        n_fft, hop = processor.kwargs['n_fft'], processor.kwargs['hop_length']
+    if size <= n_fft // 2:
+        raise ValueError(f'chunk_size must exceed {n_fft // 2} for centered STFT')
+    if batch < 1 or hop < 1:
+        raise ValueError('batch_size and STFT hop must be positive')
+    frames = 1 + (size + 2 * (n_fft // 2) - n_fft) // hop
+    if isinstance(processor, STFT):
+        return (batch, 4, processor.dim_f, frames)
+    if processor.mel:
+        return (batch, processor.indices.numel(), frames, 2)
+    return (batch, frames, (n_fft // 2 + 1) * processor.channels * 2)

@@ -1,9 +1,8 @@
 """Build a TensorRT 10 engine using the parsed ONNX input and config."""
 import argparse
 from pathlib import Path
-import torch
 from utils import MODEL_TYPES, load_config, chunk_size
-from models.preprocess import make_processor
+from models.preprocess import spectral_input_shape
 
 
 def export_to_tensorrt(onnx_path, model_type, config, output_path, fp16=False):
@@ -17,9 +16,13 @@ def export_to_tensorrt(onnx_path, model_type, config, output_path, fp16=False):
     if network.num_inputs != 1 or network.num_outputs != 1:
         raise ValueError('Expected one spectral input and one output')
     input_tensor = network.get_input(0)
-    processor = make_processor(config, model_type)
-    with torch.no_grad():
-        shape = list(processor.stft(torch.zeros(1, 2, chunk_size(config))).shape)
+    output_tensor = network.get_output(0)
+    if any(t.dtype not in (trt.float32, trt.float16) for t in (input_tensor, output_tensor)):
+        raise ValueError('Expected float32 or float16 TensorRT input and output')
+    batch = int(config.inference.batch_size)
+    if batch < 1:
+        raise ValueError('batch_size must be positive')
+    shape = list(spectral_input_shape(config, model_type, chunk_size(config)))
     declared = tuple(input_tensor.shape)
     if len(declared) != len(shape):
         raise ValueError(f'ONNX input rank {declared} does not match expected shape {shape}')
@@ -33,7 +36,7 @@ def export_to_tensorrt(onnx_path, model_type, config, output_path, fp16=False):
         profile = builder.create_optimization_profile()
         lo, hi = shape.copy(), shape.copy()
         if declared[0] < 0:
-            hi[0] = int(config.inference.batch_size)
+            hi[0] = batch
         if not profile.set_shape(input_tensor.name, tuple(lo), tuple(hi), tuple(hi)):
             raise ValueError(f'Invalid optimization profile for {input_tensor.name}')
         if build_config.add_optimization_profile(profile) < 0:

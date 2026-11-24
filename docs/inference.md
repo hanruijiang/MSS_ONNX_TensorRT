@@ -9,19 +9,21 @@ All presets use 44.1 kHz stereo. Mono input is duplicated to stereo. Outputs pre
 | MelBand Roformer | B × selected band-frequency-channel entries × T × 2 | per-band masks, averaged across overlapping bands |
 | BS PolarFormer | B × T × 4100, `stft_features` | B × 1 × 2050 × T × 2, `mask` |
 
-PolarFormer uses 2048 FFT/window, 512 hop, periodic Hann, centered STFT, unnormalized, frequency-major stereo interleaving. The complex mask multiplies the original spectrum; DC is zeroed in each channel before iSTFT with explicit waveform length. `audio.hop_length` and `audio.dim_t` from training configs are not used for this model. The official inference chunk is 882000 samples (1723 frames), overlap 2; default batch 1 here to limit memory. The FP16-weight Hugging Face graph keeps FP32 external IO; it is not a true FP16 compute engine.
+PolarFormer uses 2048 FFT/window, 512 hop, periodic Hann, centered STFT, unnormalized, frequency-major stereo interleaving. The complex mask multiplies the original spectrum; DC is zeroed by default in each channel for all three Roformer presets before iSTFT with explicit waveform length (`model.zero_dc` overrides this). `audio.hop_length` and `audio.dim_t` from training configs are not used for this model. The official inference chunk is 882000 samples (1723 frames), overlap 2; default batch 1 here to limit memory. The FP16-weight Hugging Face graph keeps FP32 external IO; it is not a true FP16 compute engine.
 
 ## Dependencies
 
-The common requirements are used by the shared audio/configuration pipeline. Existing ONNX graphs need only the common requirements and exactly one ONNX Runtime distribution (CPU or GPU). TensorRT build/inference needs the common requirements plus a compatible TensorRT 10.x installation, without ONNX Runtime or the Python ONNX package. For checkpoint inference/export, install only the selected model extra described in the [README](../README.md). The Python ONNX package is needed for checkpoint export/checking, and ONNX Script only for the PolarFormer Dynamo export path. Model architecture imports are lazy; beartype and an explicit timm dependency are not needed.
+The common requirements are used by the shared audio/configuration pipeline. Existing ONNX graphs need only the common requirements and exactly one ONNX Runtime distribution (CPU or GPU). TensorRT build/inference needs the common requirements plus a compatible TensorRT 10.x installation, without ONNX Runtime or the Python ONNX package. For checkpoint inference/export, install only the selected model extra described in the [README](../README.md). The Python ONNX package is needed for checkpoint export/checking, and ONNX Script only for the PolarFormer Dynamo export path. Model architecture imports are lazy; beartype and an explicit timm dependency are not needed. The two BS variants share a spectral core, with Rotary or PoPE embeddings imported only for the selected model. PoPE weights are loaded strictly before conversion to detached attention buffers. Use mutually compatible versions of PyTorch, ONNX, ONNX Script and ORT; the PoPE package must expose `inv_freqs` and `bias`.
 
 ## Runtime selection
 
-- `--use_onnx --onnx_model_path ...`: uses CPU or CUDA Execution Provider. No checkpoint/model construction.
+- `--use_onnx --onnx_model_path ...`: uses CPU or CUDA Execution Provider. No checkpoint/model construction. CUDA requests require successful CUDA provider initialization; ordinary per-node CPU fallback may still occur.
 - `--use_tensorrt --tensorrt_model_path ...`: TensorRT 10, CUDA required; shapes/dtypes taken from engine tensors, execution on the selected PyTorch CUDA stream.
 - Neither flag: PyTorch spectral core, requires `--start_check_point ...`. Optional `--use_compile` compiles this core only.
 - `--use_tta`: channel swap and polarity averaging for all backends; slower.
-- `--chunk_size`, `--batch_size`: override inference settings. Static ONNX axes must match the preset. TensorRT build fixes non-batch dimensions to the chosen chunk shape; use the same chunk size for inference. Dynamic batch is bounded by build profile. Final batches are padded for fixed-batch engines.
+- `--chunk_size`, `--batch_size`: override inference settings. Static ONNX axes must match the preset. TensorRT build fixes non-batch dimensions to the chosen chunk shape; use the same chunk size for inference. Dynamic batch is bounded by build profile. Final batches are padded for fixed-batch engines or to the profile minimum. Input rank, static dimensions and TensorRT profile bounds are checked before processing audio; supported external IO is FP32 or FP16.
+
+The two Rotary cores use explicit attention; the PolarFormer adapter uses scaled dot-product attention. Training-only AMP and gradient checkpointing options are not used. Chunk tails longer than half a chunk use reflection padding; shorter tails use zero padding. Checkpoint loading accepts raw state dicts and `state`, `state_dict`, or `model_state_dict` wrappers, strips `module.` and `_orig_mod.` prefixes, and remains strict with `weights_only=True`.
 
 ## Memory and numerical validation
 

@@ -26,7 +26,6 @@ training:
   - vocals
   - other
   target_instrument: null
-  use_amp: true # enable or disable usage of mixed precision (float16) - usually it must be true
 
 inference:
   batch_size: 1
