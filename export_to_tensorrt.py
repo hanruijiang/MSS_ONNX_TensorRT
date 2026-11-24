@@ -1,178 +1,71 @@
-import pycuda.autoinit
-import pycuda.driver as cuda
-import tensorrt as trt
-import numpy as np
-import os
+"""Build a TensorRT 10 engine using the parsed ONNX input and config."""
 import argparse
-from typing import Dict, Any, Union, List
-import onnx
+from pathlib import Path
 import torch
-import onnxruntime as ort
-from models.preprocess import STFT, HTDemucs_processor, BS_roformer_processor, Mel_band_roformer_processor
+from utils import MODEL_TYPES, load_config, chunk_size
+from models.preprocess import make_processor
 
-class TensorRTExporter:
-    def __init__(self, onnx_path: str, model_type: str, config: Dict[str, Any]):
-        """
-        Initialize TensorRT exporter.
-        
-        Args:
-            onnx_path: Path to ONNX model
-            model_type: Type of model ('htdemucs', 'bs_roformer', etc.)
-            config: Model configuration dictionary
-        """
-        self.onnx_path = onnx_path
-        self.model_type = model_type
-        self.cfg = config
-        self.onnx_path = onnx_path
-        self.logger = None
-        self.builder = None
-        self.network = None
-        self.config = None
-        self.parser = None
-        
-        if model_type == 'htdemucs':
-            self.preprocessor = HTDemucs_processor(config)
-        elif model_type == 'bs_roformer':
-            self.preprocessor = BS_roformer_processor(**dict(config.model))
-        elif model_type == 'mel_band_roformer':
-            self.preprocessor = Mel_band_roformer_processor(**dict(config.model))
-        else:
-            self.preprocessor = STFT(config.audio)
 
-    def _set_optimization_profile(self, input_shapes: Dict[str, List[int]]):
-        """
-        Set optimization profile for dynamic shapes.
-        
-        Args:
-            input_shapes: Dictionary of input names and their shapes
-        """
-        for name, shape in input_shapes.items():
-            self.profile.set_shape(
-                name,
-                tuple([1] + shape[1:]), 
-                tuple([self.cfg.inference.batch_size] + shape[1:]),
-                tuple([self.cfg.inference.batch_size] + shape[1:])
-            )
-        self.config.add_optimization_profile(self.profile)
+def export_to_tensorrt(onnx_path, model_type, config, output_path, fp16=False):
+    import tensorrt as trt
+    logger = trt.Logger(trt.Logger.WARNING)
+    builder = trt.Builder(logger)
+    network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+    parser = trt.OnnxParser(network, logger)
+    if not parser.parse_from_file(str(onnx_path)):
+        raise RuntimeError('\n'.join(str(parser.get_error(i)) for i in range(parser.num_errors)))
+    if network.num_inputs != 1 or network.num_outputs != 1:
+        raise ValueError('Expected one spectral input and one output')
+    input_tensor = network.get_input(0)
+    processor = make_processor(config, model_type)
+    with torch.no_grad():
+        shape = list(processor.stft(torch.zeros(1, 2, chunk_size(config))).shape)
+    declared = tuple(input_tensor.shape)
+    if len(declared) != len(shape):
+        raise ValueError(f'ONNX input rank {declared} does not match expected shape {shape}')
+    if declared[0] > 0:
+        shape[0] = declared[0]
+    for a, b in zip(declared, shape):
+        if a >= 0 and a != b:
+            raise ValueError(f'ONNX input shape {declared} does not match expected shape {shape}')
+    build_config = builder.create_builder_config()
+    if any(d < 0 for d in declared):
+        profile = builder.create_optimization_profile()
+        lo, hi = shape.copy(), shape.copy()
+        if declared[0] < 0:
+            hi[0] = int(config.inference.batch_size)
+        if not profile.set_shape(input_tensor.name, tuple(lo), tuple(hi), tuple(hi)):
+            raise ValueError(f'Invalid optimization profile for {input_tensor.name}')
+        if build_config.add_optimization_profile(profile) < 0:
+            raise RuntimeError('Failed to register TensorRT profile')
+    if fp16:
+        build_config.set_flag(trt.BuilderFlag.FP16)
+    serialized = builder.build_serialized_network(network, build_config)
+    if serialized is None:
+        raise RuntimeError('TensorRT engine build failed; check parser logs and GPU memory')
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(bytes(serialized))
+    print(f'Saved TensorRT engine: {output_path}')
 
-    def _preprocess_input(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Preprocess input tensor according to model type.
-        """
-        return self.preprocessor.stft(x)
-
-    def _get_input_shapes(self) -> Dict[str, List[int]]:
-        """
-        Get input shapes based on model type.
-        """
-        if self.model_type == 'htdemucs':
-            chunk_size = self.cfg.training.samplerate * self.cfg.training.segment
-            return {
-                'stft_input': list(self._preprocess_input(torch.randn((1, 2, chunk_size), device='cuda')).shape),
-                'raw_audio': [1, 2, chunk_size]
-            }
-        else:
-            chunk_size = self.cfg.audio.chunk_size
-            print((1, 2, chunk_size))
-            return {
-                'input': list(self._preprocess_input(torch.randn((1, 2, chunk_size), device='cuda')).shape)
-            }
-
-    def export(self, output_path: str, fp16: bool = True) -> None:
-        """
-        Export ONNX model to TensorRT format.
-        
-        Args:
-            output_path: Path to save TensorRT engine
-            fp16: Whether to use FP16 precision
-        """
-        input_shapes = self._get_input_shapes()
-        self.logger = trt.Logger(trt.Logger.WARNING)
-        self.builder = trt.Builder(self.logger)
-        self.network = self.builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
-        self.config = self.builder.create_builder_config()
-        if self.cfg.inference.batch_size > 1:
-            
-            self.profile = self.builder.create_optimization_profile()
-            self._set_optimization_profile(input_shapes)
-
-        if fp16 and self.builder.platform_has_fast_fp16:
-            self.config.set_flag(trt.BuilderFlag.FP16)
-        
-        self.parser = trt.OnnxParser(self.network, self.logger)
-        
-        with open(self.onnx_path, 'rb') as model:
-            if not self.parser.parse(model.read()):
-                for error in range(self.parser.num_errors):
-                    print(self.parser.get_error(error))
-                raise RuntimeError("Failed to parse ONNX model")
-        
-        print("Building TensorRT engine...")
-        engine = self.builder.build_engine_with_config(self.network, self.config)
-        
-        if engine is None:
-            raise RuntimeError("Failed to build TensorRT engine")
-        
-        with open(output_path, 'wb') as f:
-            f.write(engine.serialize())
-        
-        print(f"TensorRT engine saved to {output_path}")
-
-def export_to_tensorrt(
-    onnx_path: str,
-    model_type: str,
-    config: Dict[str, Any],
-    output_path: str,
-    fp16: bool = True
-) -> None:
-    """
-    Helper function to export ONNX model to TensorRT format.
-    
-    Args:
-        onnx_path: Path to ONNX model
-        model_type: Type of model ('htdemucs', 'bs_roformer', etc.)
-        config: Model configuration dictionary
-        output_path: Path to save TensorRT engine
-        fp16: Whether to use FP16 precision
-    """
-    exporter = TensorRTExporter(onnx_path, model_type, config)
-    exporter.export(output_path, fp16)
-
-def parse_args():
-    parser = argparse.ArgumentParser(description='Export ONNX model to TensorRT format')
-    parser.add_argument('--onnx_path', type=str, required=True,
-                      help='Path to ONNX model')
-    parser.add_argument('--model_type', type=str, required=True,
-                      help='Type of model (htdemucs, bs_roformer, etc.)')
-    parser.add_argument('--config_path', type=str, required=True,
-                      help='Path to model configuration file')
-    parser.add_argument('--output_path', type=str, required=True,
-                      help='Path to save TensorRT engine')
-    parser.add_argument('--fp16', action='store_true',
-                      help='Use FP16 precision')
-    return parser.parse_args()
 
 def main():
-    args = parse_args()
-    
-    if args.model_type == 'htdemucs':
-        from omegaconf import OmegaConf
-        config = OmegaConf.load(args.config_path)
-    else:
-        import yaml
-        from ml_collections import ConfigDict
-        with open(args.config_path, 'r') as f:
-            config = ConfigDict(yaml.load(f, Loader=yaml.FullLoader))
-    
-    os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
-    
-    export_to_tensorrt(
-        onnx_path=args.onnx_path,
-        model_type=args.model_type,
-        config=config,
-        output_path=args.output_path,
-        fp16=args.fp16
-    )
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--onnx_path', required=True)
+    p.add_argument('--model_type', choices=MODEL_TYPES, required=True)
+    p.add_argument('--config_path', required=True)
+    p.add_argument('--output_path', required=True)
+    p.add_argument('--fp16', action='store_true')
+    p.add_argument('--chunk_size', type=int)
+    p.add_argument('--batch_size', type=int)
+    args = p.parse_args()
+    config = load_config(args.model_type, args.config_path)
+    if args.chunk_size is not None:
+        config.inference.chunk_size = args.chunk_size
+    if args.batch_size is not None:
+        config.inference.batch_size = args.batch_size
+    export_to_tensorrt(args.onnx_path, args.model_type, config, args.output_path, args.fp16)
 
-if __name__ == "__main__":
-    main() 
+
+if __name__ == '__main__':
+    main()
