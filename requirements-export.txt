@@ -1,0 +1,9 @@
+-r requirements.txt
+onnx>=1.16
+onnxscript
+onnxruntime
+beartype
+rotary-embedding-torch==0.3.5
+segmentation-models-pytorch==0.3.3
+timm==0.9.2
+PoPE-pytorch

@@ -1,0 +1,3 @@
+-r requirements.txt
+onnxruntime
+# For CUDA use onnxruntime-gpu INSTEAD of onnxruntime.

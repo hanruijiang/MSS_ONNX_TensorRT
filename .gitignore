@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+input/
+outputs/
+weights/
+*.ckpt
+*.pth
+*.pt
+*.onnx
+*.onnx.data
+*.engine
+*.plan
+.ipynb_checkpoints/
