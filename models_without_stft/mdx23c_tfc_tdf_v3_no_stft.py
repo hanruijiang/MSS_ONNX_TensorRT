@@ -1,18 +1,7 @@
+"""MDX23C spectral core."""
 import torch
 import torch.nn as nn
-from utils import prefer_target_instrument
-
-
-def get_norm(norm_type):
-    if norm_type != 'InstanceNorm':
-        raise ValueError('Only InstanceNorm is supported')
-    return lambda c: nn.InstanceNorm2d(c, affine=True)
-
-
-def get_act(act_type):
-    if act_type != 'gelu':
-        raise ValueError('Only GELU is supported')
-    return nn.GELU()
+from models_without_stft.spectral_common import cac2cws, cws2cac
 
 
 class Upscale(nn.Module):
@@ -83,13 +72,13 @@ class TFC_TDF(nn.Module):
 
 
 class TFC_TDF_net(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, num_target_instruments):
         super().__init__()
 
-        norm = get_norm(norm_type=config.model.norm)
-        act = get_act(act_type=config.model.act)
+        norm = lambda c: nn.InstanceNorm2d(c, affine=True)
+        act = nn.GELU()
 
-        self.num_target_instruments = len(prefer_target_instrument(config))
+        self.num_target_instruments = num_target_instruments
         self.num_subbands = config.model.num_subbands
 
         dim_c = self.num_subbands * config.audio.num_channels * 2
@@ -129,23 +118,9 @@ class TFC_TDF_net(nn.Module):
             nn.Conv2d(c, self.num_target_instruments * dim_c, 1, 1, 0, bias=False)
         )
 
-    def cac2cws(self, x):
-        k = self.num_subbands
-        b, c, f, t = x.shape
-        x = x.reshape(b, c, k, f // k, t)
-        x = x.reshape(b, c * k, f // k, t)
-        return x
-
-    def cws2cac(self, x):
-        k = self.num_subbands
-        b, c, f, t = x.shape
-        x = x.reshape(b, c // k, k, f, t)
-        x = x.reshape(b, c // k, f * k, t)
-        return x
-
     def forward(self, x):
 
-        mix = x = self.cac2cws(x)
+        mix = x = cac2cws(x, self.num_subbands)
 
         first_conv_out = x = self.first_conv(x)
 
@@ -170,7 +145,7 @@ class TFC_TDF_net(nn.Module):
 
         x = self.final_conv(torch.cat([mix, x], 1))
 
-        x = self.cws2cac(x)
+        x = cws2cac(x, self.num_subbands)
 
         if self.num_target_instruments > 1:
             b, c, f, t = x.shape

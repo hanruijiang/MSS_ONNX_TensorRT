@@ -1,8 +1,4 @@
-# Inference-only projection of official MSST v1.0.20 PolarFormer YAML:
-# https://github.com/ZFTurbo/Music-Source-Separation-Training/releases/download/v1.0.20/model_bs_polarformer_float16.yaml
-# The model architecture options below match the pretrained checkpoint.
 audio:
-  num_channels: 2
   sample_rate: 44100
 
 model:
@@ -12,7 +8,7 @@ model:
   num_stems: 1
   time_transformer_depth: 1
   freq_transformer_depth: 1
-  freqs_per_bands: !!python/tuple
+  freqs_per_bands:
     - 2
     - 2
     - 2
@@ -86,16 +82,11 @@ model:
   stft_normalized: false
   mask_estimator_depth: 2
   mlp_expansion_factor: 4
-  use_pope: true
-
-training:
-  instruments:
-    - vocals
-    - other
-  target_instrument: vocals
 
 inference:
   chunk_size: 882000
-  batch_size: 1 # memory-conscious default for ONNX/TensorRT
+  stems:
+    - vocals
+  batch_size: 1
   num_overlap: 2
   normalize: false

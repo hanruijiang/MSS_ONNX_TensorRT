@@ -13,23 +13,24 @@ def load_config(model_type, config_path):
     if model_type not in MODEL_TYPES:
         raise ValueError(f'Unknown model type: {model_type}')
     with open(config_path, encoding='utf-8') as f:
-        # FullLoader supports the legacy !!python/tuple presets.
-        config = ConfigDict(yaml.full_load(f))
-    if model_type == 'bs_polarformer' and not config.model.get('use_pope', False):
-        raise ValueError('BS PolarFormer requires use_pope: true')
-    return config
+        return ConfigDict(yaml.safe_load(f))
 
 
 def chunk_size(config):
-    size = int(config.inference.get('chunk_size', config.audio.get('chunk_size', 0)))
+    size = int(config.inference.chunk_size)
     if size <= 0:
         raise ValueError('chunk_size must be positive')
     return size
 
 
-def prefer_target_instrument(config):
-    target = config.training.get('target_instrument')
-    return [target] if target else list(config.training.instruments)
+def inference_batch_size(config, model):
+    batch = int(config.inference.batch_size)
+    if batch < 1:
+        raise ValueError('batch_size must be positive')
+    fixed = getattr(model, 'fixed_batch', None)
+    minimum = getattr(model, 'min_batch', 1)
+    maximum = getattr(model, 'max_batch', None)
+    return fixed or max(minimum, min(batch, maximum or batch))
 
 
 def load_core(model_type, config, checkpoint):
@@ -37,14 +38,14 @@ def load_core(model_type, config, checkpoint):
     params = dict(config.model)
     if model_type == 'mdx23c':
         from models_without_stft.mdx23c_tfc_tdf_v3_no_stft import TFC_TDF_net
-        model = TFC_TDF_net(config)
+        model = TFC_TDF_net(config, len(config.inference.stems))
     elif model_type == 'segm_models':
         from models_without_stft.segm_models_no_stft import Segm_Models_Net
-        model = Segm_Models_Net(config)
+        model = Segm_Models_Net(config, len(config.inference.stems))
     elif model_type in ('bs_roformer', 'bs_polarformer', 'mel_band_roformer'):
         # Waveform-only options belong to the external processor.
         for key in ('stft_hop_length', 'stft_win_length', 'stft_normalized',
-                    'zero_dc', 'flash_attn'):
+                    'zero_dc'):
             params.pop(key, None)
         if model_type == 'mel_band_roformer':
             from models_without_stft.mel_band_roformer_no_stft import MelBandRoformer
@@ -70,9 +71,6 @@ def load_core(model_type, config, checkpoint):
             raise ValueError(f'Duplicate checkpoint key after prefix removal: {key}')
         cleaned[key] = value
     model.load_state_dict(cleaned, strict=True)
-    if model_type == 'bs_polarformer':
-        from models_without_stft.bs_polarformer_no_stft import replace_pope_with_standard_attn
-        model = replace_pope_with_standard_attn(model)
     return model.eval()
 
 
@@ -122,18 +120,16 @@ def demix(config, model, mix, device, model_type, pbar=False):
     """Overlap-add fixed-size chunks; returns named stereo waveforms."""
     size = chunk_size(config)
     overlap = int(config.inference.num_overlap)
-    batch = int(config.inference.batch_size)
-    if not 1 <= overlap <= size or batch < 1:
-        raise ValueError('Invalid num_overlap or batch_size')
+    if not 1 <= overlap <= size:
+        raise ValueError('Invalid num_overlap')
+    batch = inference_batch_size(config, model)
     fixed_batch = getattr(model, 'fixed_batch', None)
-    max_batch = getattr(model, 'max_batch', None)
     min_batch = getattr(model, 'min_batch', 1)
-    batch = fixed_batch or max(min_batch, min(batch, max_batch or batch))
     mix = torch.as_tensor(mix, dtype=torch.float32, device='cpu')
     if mix.ndim != 2 or mix.shape[0] != 2 or mix.shape[1] == 0:
         raise ValueError('Expected nonempty stereo audio (2, samples)')
     length = mix.shape[-1]
-    names = prefer_target_instrument(config)
+    names = list(config.inference.stems)
     step = size // overlap
     fade = min(size // 10, size-step)
     window = torch.ones(size)

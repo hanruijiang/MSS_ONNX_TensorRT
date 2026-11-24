@@ -1,4 +1,4 @@
-"""Spectral interfaces for the five retained pretrained presets."""
+"""Spectral preprocessing and waveform reconstruction."""
 import torch
 from einops import rearrange
 from librosa import filters

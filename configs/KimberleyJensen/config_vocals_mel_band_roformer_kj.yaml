@@ -1,8 +1,4 @@
-# Inference-only checkpoint preset. Model weights and structure are unchanged.
-
 audio:
-  chunk_size: 352800
-  num_channels: 2
   sample_rate: 44100
 
 model:
@@ -25,12 +21,9 @@ model:
   stft_normalized: False
   mask_estimator_depth: 2
 
-training:
-  instruments:
-  - vocals
-  - other
-  target_instrument: vocals
-
 inference:
+  chunk_size: 352800
+  stems:
+    - vocals
   batch_size: 4
   num_overlap: 2

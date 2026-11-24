@@ -1,6 +1,6 @@
 # MSS ONNX / TensorRT — Vocal separation
 
-人声分离推理与模型导出仓库。参考 [MSST vocal-inference-only](https://github.com/hanruijiang/Music-Source-Separation-Training/tree/cleanup/vocal-inference-only)，仅保留五个预训练版本，移除训练、验证、LoRA、GUI、临时 notebook 和其它模型预设。ONNX / TensorRT 仅运行神经网络核心；STFT、掩码和 iSTFT 在 PyTorch 侧完成。推理无需原始 checkpoint 或模型架构依赖。
+Vocal separation inference and deployment with PyTorch, ONNX Runtime and TensorRT. The accelerated backends execute the neural network core; STFT, mask application and iSTFT run in PyTorch. Existing ONNX graphs and TensorRT engines require no checkpoint or model architecture dependencies.
 
 ## Models
 
@@ -34,13 +34,13 @@ For PyTorch checkpoint inference or ONNX export, additionally install **only** t
 | MDX23C | None |
 | Segm Models | `pip install segmentation-models-pytorch==0.3.3` |
 | BS Roformer / MelBand Roformer | `pip install rotary-embedding-torch==0.3.5` |
-| BS PolarFormer | `pip install PoPE-pytorch` |
+| BS PolarFormer | None |
 
-For PolarFormer checkpoint-to-ONNX export, also run `pip install onnxscript` (the Dynamo exporter requires it). It is not needed for checkpoint inference or loading an existing ONNX graph. Segm Models 0.3.3 installs its own pinned `timm==0.9.2` and torchvision dependencies; use a torchvision build compatible with your PyTorch. To export all five presets, install all three model extras plus onnxscript. No model extras are needed to run existing ONNX graphs or build/run TensorRT engines. PoPE-pytorch must expose the checkpoint-compatible `PoPE.inv_freqs` and `PoPE.bias` attributes. Use mutually compatible PyTorch, ONNX, ONNX Script and ORT versions; no unverified version pins are implied.
+For PolarFormer ONNX export, install `onnxscript` for the Dynamo exporter. Segm Models installs `timm==0.9.2` and torchvision through its pinned architecture dependency; use torchvision compatible with PyTorch. Existing ONNX graphs and TensorRT engines do not require model extras.
 
 For CUDA, ensure PyTorch, CUDA, cuDNN, ONNX Runtime and TensorRT are compatible. TensorRT engines are device/runtime specific. See [backend guide](docs/inference.md).
 
-## Quick start: BS PolarFormer
+## Inference
 
 Use the published [FP32 ONNX](https://huggingface.co/bgkb/bs_polarformer/resolve/main/bs_polarformer.onnx) or [FP16-weight ONNX](https://huggingface.co/bgkb/bs_polarformer/resolve/main/bs_polarformer_fp16.onnx), not the WebGPU variants.
 
@@ -53,6 +53,8 @@ python inference.py --model_type bs_polarformer \
   --input_folder input --store_dir outputs --extract_instrumental \
   --use_onnx --onnx_model_path weights/bs_polarformer.onnx --force_cpu
 ```
+
+## TensorRT export and inference
 
 Build an engine on the target GPU, then run:
 
@@ -69,7 +71,7 @@ python inference.py --model_type bs_polarformer \
 
 For other models substitute the preset, model type and exported ONNX/engine path.
 
-## Export from checkpoint
+## ONNX export
 
 ```bash
 python export_to_onnx.py --model_type bs_roformer \
@@ -78,16 +80,27 @@ python export_to_onnx.py --model_type bs_roformer \
   --output_path weights/bs_roformer.onnx --force_cpu
 ```
 
-BS Roformer and BS PolarFormer share one spectral core; PolarFormer loads the original PoPE checkpoint strictly before replacing only PoPE attention with the ONNX-compatible implementation adapted from bgkb. PolarFormer defaults to opset 18; other models default to opset 17. Export uses strict checkpoint loading and compares the core output with ONNX Runtime. Only load trusted checkpoints. A prebuilt ONNX is sufficient for accelerated inference.
+PolarFormer defaults to opset 18; other models default to opset 17. Export loads the checkpoint strictly and compares the output with ONNX Runtime.
 
-## Tests and validation
+## PyTorch inference
+
+```bash
+python inference.py --model_type bs_roformer \
+  --config_path configs/viperx/model_bs_roformer_ep_317_sdr_12.9755.yaml \
+  --start_check_point weights/model_bs_roformer_ep_317_sdr_12.9755.ckpt \
+  --input_folder input --store_dir outputs --extract_instrumental --device_id 0
+```
+
+Use `--use_compile` to compile the neural network core. See [backend guide](docs/inference.md) for chunk and batch settings, precision, audio output and tensor shapes.
+
+## Tests
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-The tests cover preset loading, PolarFormer feature ordering, complex mask / DC handling, and short/partial chunks without downloading weights. Real-weight ONNX parity and TensorRT engine builds on supported NVIDIA hardware are required before release; no benchmark or GPU validation is claimed.
+The tests cover configuration loading, PolarFormer feature ordering, complex mask reconstruction, DC handling and short/partial chunks.
 
 ## Credits
 
-Original MSST: [ZFTurbo](https://github.com/ZFTurbo/Music-Source-Separation-Training) (Roman Solovyev); inference presets: [hanruijiang fork](https://github.com/hanruijiang/Music-Source-Separation-Training/tree/cleanup/vocal-inference-only); PolarFormer ONNX conversion and interface: [bgkb/bs_polarformer](https://huggingface.co/bgkb/bs_polarformer); Roformer and PoPE: [lucidrains](https://github.com/lucidrains). MIT license; preserve original notices. Checkpoint links intentionally point to their actual publishers.
+Original MSST: [ZFTurbo](https://github.com/ZFTurbo/Music-Source-Separation-Training) (Roman Solovyev); PolarFormer ONNX conversion and interface: [bgkb/bs_polarformer](https://huggingface.co/bgkb/bs_polarformer); Roformer and PoPE: [lucidrains](https://github.com/lucidrains). See [LICENSE](LICENSE) for license terms.

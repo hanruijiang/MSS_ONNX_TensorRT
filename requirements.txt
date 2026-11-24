@@ -1,5 +1,3 @@
-# Install a PyTorch build appropriate for your CPU/CUDA environment first.
-# Common audio / spectral pipeline; no backend or model architecture packages.
 torch>=2.6
 numpy
 PyYAML

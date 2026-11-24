@@ -1,7 +1,4 @@
-# Inference-only checkpoint preset. Model weights and structure are unchanged.
-
 audio:
-  chunk_size: 261120
   dim_f: 4096
   hop_length: 1024
   n_fft: 8192
@@ -9,10 +6,8 @@ audio:
   sample_rate: 44100
 
 model:
-  act: gelu
   bottleneck_factor: 4
   growth: 128
-  norm: InstanceNorm
   num_blocks_per_scale: 2
   num_channels: 128
   num_scales: 5
@@ -21,12 +16,10 @@ model:
   - 2
   - 2
 
-training:
-  instruments:
-  - vocals
-  - other
-  target_instrument: null
-
 inference:
+  chunk_size: 261120
+  stems:
+    - vocals
+    - other
   batch_size: 1
   num_overlap: 4

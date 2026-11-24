@@ -5,7 +5,7 @@ import librosa
 import numpy as np
 import soundfile as sf
 import torch
-from utils import MODEL_TYPES, load_config, load_core, ONNXBackend, demix, normalize_audio, denormalize_audio, chunk_size
+from utils import MODEL_TYPES, load_config, load_core, ONNXBackend, demix, normalize_audio, denormalize_audio, chunk_size, inference_batch_size
 from models.preprocess import spectral_input_shape
 
 
@@ -23,7 +23,7 @@ def parse_args(dict_args=None):
     parser.add_argument('--tensorrt_model_path')
     parser.add_argument('--start_check_point')
     parser.add_argument('--force_cpu', action='store_true')
-    parser.add_argument('--device_ids', nargs='+', type=int, default=[0])
+    parser.add_argument('--device_id', type=int, default=0, help='CUDA device index')
     parser.add_argument('--chunk_size', type=int)
     parser.add_argument('--batch_size', type=int)
     parser.add_argument('--extract_instrumental', action='store_true')
@@ -46,9 +46,8 @@ def proc_folder(dict_args=None):
         config.inference.chunk_size = args.chunk_size
     if args.batch_size is not None:
         config.inference.batch_size = args.batch_size
-    ids = args.device_ids
     device = torch.device('cpu' if args.force_cpu or not torch.cuda.is_available()
-                          else f'cuda:{ids[0] if isinstance(ids, list) else ids}')
+                          else f'cuda:{args.device_id}')
     if args.use_onnx:
         if not args.onnx_model_path:
             raise ValueError('--onnx_model_path is required')
@@ -64,15 +63,9 @@ def proc_folder(dict_args=None):
         model = load_core(args.model_type, config, args.start_check_point).to(device)
         if args.use_compile:
             model = torch.compile(model)
-    batch = int(config.inference.batch_size)
-    overlap = int(config.inference.num_overlap)
-    size = chunk_size(config)
-    if batch < 1 or not 1 <= overlap <= size:
-        raise ValueError('Invalid num_overlap or batch_size')
     if args.use_onnx or args.use_tensorrt:
-        batch = model.fixed_batch or max(getattr(model, 'min_batch', 1),
-                                         min(batch, getattr(model, 'max_batch', None) or batch))
-        model.validate_shape(spectral_input_shape(config, args.model_type, size, batch))
+        batch = inference_batch_size(config, model)
+        model.validate_shape(spectral_input_shape(config, args.model_type, chunk_size(config), batch))
     output = Path(args.store_dir)
     output.mkdir(parents=True, exist_ok=True)
     rate = int(config.audio.get('sample_rate', 44100))

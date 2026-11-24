@@ -1,8 +1,2 @@
-# Common ONNX exporter and CPU validation runtime.
-# For GPU ORT instead, install -r requirements.txt onnx>=1.16 onnxruntime-gpu
-# (quote version specifiers on the shell); do not install both ORT packages.
 -r requirements-onnx.txt
 onnx>=1.16
-# Install only your model's optional dependencies from README.md.
-# PolarFormer dynamo export additionally needs onnxscript (compatible with torch/onnx).
-# ORT validation uses the CPU provider, including with the GPU ORT distribution.

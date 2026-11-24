@@ -1,7 +1,4 @@
-# Inference-only checkpoint preset. Model weights and structure are unchanged.
-
 audio:
-  chunk_size: 261632
   dim_f: 4096
   hop_length: 512
   n_fft: 8192
@@ -9,18 +6,14 @@ audio:
   sample_rate: 44100
 
 model:
-  encoder_name: tu-maxvit_large_tf_512 # look here for possibilities: https://github.com/qubvel/segmentation_models.pytorch#encoders-
-  decoder_type: unet
-  act: gelu
+  encoder_name: tu-maxvit_large_tf_512
   num_channels: 128
   num_subbands: 8
 
-training:
-  instruments:
-  - vocals
-  - other
-  target_instrument: null
-
 inference:
+  chunk_size: 261632
+  stems:
+    - vocals
+    - other
   batch_size: 1
   num_overlap: 4
