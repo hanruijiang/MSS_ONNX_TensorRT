@@ -19,8 +19,8 @@ def export_model_to_onnx(config, model, model_type, output_path, opset_version=N
     model = model.to(device).eval()
     processor = make_processor(config, model_type)
     # PolarFormer has dynamic time; trace a smaller chunk to reduce export memory.
-    size = min(chunk_size(config), 131072) if polar else chunk_size(config)
-    x = processor.stft(torch.randn(1, 2, size, device=device))
+    size = min(chunk_size(config), 65536) if polar else chunk_size(config)
+    x = processor.stft(torch.randn(2 if polar else 1, 2, size, device=device))
     names = ('stft_features', 'mask') if polar else ('input', 'output')
     with torch.no_grad():
         expected = model(x).detach().cpu().numpy()
@@ -37,6 +37,13 @@ def export_model_to_onnx(config, model, model_type, output_path, opset_version=N
     session = ort.InferenceSession(output_path, providers=['CPUExecutionProvider'])
     actual = session.run(None, {names[0]: x.cpu().numpy()})[0]
     np.testing.assert_allclose(actual, expected, rtol=1e-2, atol=1e-3)
+    if polar:
+        # A different batch/time shape catches accidentally specialized dynamic exports.
+        probe = processor.stft(torch.randn(1, 2, size + 512, device=device))
+        with torch.no_grad():
+            reference = model(probe).cpu().numpy()
+        actual = session.run(None, {names[0]: probe.cpu().numpy()})[0]
+        np.testing.assert_allclose(actual, reference, rtol=1e-2, atol=1e-3)
     print(f'Exported and compared against PyTorch: {output_path}')
 
 
