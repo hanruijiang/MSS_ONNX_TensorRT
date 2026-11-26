@@ -12,9 +12,13 @@ class Attend(nn.Module):
     def __init__(self, dropout=0.):
         super().__init__()
         self.attn_dropout = nn.Dropout(dropout)
+        self.use_matmul = False
 
     def forward(self, q, k, v):
         scale = q.shape[-1] ** -0.5
+        if self.use_matmul:
+            sim = torch.matmul(q, k.transpose(-1, -2)) * scale
+            return torch.matmul(self.attn_dropout(sim.softmax(dim=-1)), v)
         sim = einsum('b h i d, b h j d -> b h i j', q, k) * scale
         attn = self.attn_dropout(sim.softmax(dim=-1))
         return einsum('b h i j, b h j d -> b h i d', attn, v)
@@ -84,7 +88,11 @@ class Attention(Module):
     def forward(self, x):
         x = self.norm(x)
 
-        q, k, v = rearrange(self.to_qkv(x), 'b n (qkv h d) -> qkv b h n d', qkv=3, h=self.heads)
+        if hasattr(self, 'to_qkv_gate'):
+            qkv, gates = self.to_qkv_gate(x).split([self.to_qkv_gate.out_features - self.heads, self.heads], dim=-1)
+        else:
+            qkv, gates = self.to_qkv(x), self.to_gates(x)
+        q, k, v = rearrange(qkv, 'b n (qkv h d) -> qkv b h n d', qkv=3, h=self.heads)
 
         if self.pope_embed is not None:
             out = pope_attention(q, k, v, self.pope_embed, self.scale)
@@ -93,7 +101,6 @@ class Attention(Module):
             k = self.rotary_embed.rotate_queries_or_keys(k)
             out = self.attend(q, k, v)
 
-        gates = self.to_gates(x)
         out = out * rearrange(gates, 'b n h -> b h n 1').sigmoid()
 
         out = rearrange(out, 'b h n d -> b n (h d)')
