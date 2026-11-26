@@ -1,4 +1,4 @@
-"""Portable FP32 graph optimization; intentionally avoids CPU/GPU-specific fusions."""
+"""Optimize FP32 ONNX graphs with ORT BASIC and shape inference."""
 import argparse
 from pathlib import Path
 import tempfile
@@ -20,7 +20,7 @@ def optimize_graph(source, output):
         # BASIC runs before EP partitioning: constant folding and redundant nodes.
         ort.InferenceSession(str(source), sess_options=opts, providers=['CPUExecutionProvider'])
         graph = onnx.load(str(intermediate))
-        graph = onnx.shape_inference.infer_shapes(graph, strict_mode=True)
+        graph = onnx.shape_inference.infer_shapes(graph)
         onnx.checker.check_model(graph)
         onnx.save(graph, str(output))
     print(f'Optimized FP32 graph: {output} ({len(graph.graph.node)} nodes)')

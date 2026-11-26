@@ -1,41 +1,89 @@
-"""Convert a spectral FP32 ONNX graph to mixed precision, keeping FP32 I/O."""
+"""Convert spectral-core compute kernels to FP16 with FP32 graph I/O."""
 import argparse
 from pathlib import Path
-import onnx
 
-# Preserve reduction/norm, softmax and positional nonlinearities conservatively.
-# Individual sensitive nodes (e.g. phase construction or attention score MatMul)
-# can be explicitly blocked after numerical comparison.
-SENSITIVE = {
-    'BatchNormalization', 'InstanceNormalization', 'LayerNormalization',
-    'GroupNormalization', 'RMSNormalization', 'SimplifiedLayerNormalization',
-    'ReduceL2', 'ReduceMean', 'ReduceSum', 'Sqrt', 'Pow', 'Div', 'Clip',
-    'Softmax', 'LogSoftmax', 'Exp', 'Log', 'Softplus', 'Sin', 'Cos', 'Range',
-}
+import numpy as np
+import onnx
+from onnx import TensorProto, helper, numpy_helper
+
+
+FP16_OPS = {'Conv', 'ConvTranspose', 'MatMul', 'Gemm', 'Gelu', 'Relu', 'Tanh', 'Sigmoid'}
 
 
 def convert_precision(source, output, *, blocked_ops=(), blocked_nodes=()):
-    from onnxconverter_common.float16 import convert_float_to_float16, DEFAULT_OP_BLOCK_LIST
     source, output = Path(source), Path(output)
     if source.resolve() == output.resolve():
         raise ValueError('Use a separate output path')
-    model = onnx.load(str(source))
-    if any(t.data_type == onnx.TensorProto.FLOAT16 for t in model.graph.initializer):
-        raise ValueError('Expected an FP32 source model')
-    known_names = {n.name for n in model.graph.node}
-    unknown = set(blocked_nodes) - known_names
-    if unknown:
-        raise ValueError(f'Unknown node names: {sorted(unknown)}')
-    model = convert_float_to_float16(
-        model, keep_io_types=True,
-        op_block_list=sorted(set(DEFAULT_OP_BLOCK_LIST) | SENSITIVE | set(blocked_ops)),
-        node_block_list=list(blocked_nodes))
+    model = onnx.shape_inference.infer_shapes(onnx.load(str(source)))
+    graph = model.graph
+    initializers = {t.name: t for t in graph.initializer}
+    types = {v.name: v.type.tensor_type.elem_type
+             for v in (*graph.input, *graph.output, *graph.value_info)}
+    types.update({t.name: t.data_type for t in graph.initializer})
+    ops = FP16_OPS - set(blocked_ops)
+    blocked = set(blocked_nodes)
+    nodes, half, weights = [], {}, []
+    original_nodes = list(graph.node)
+    # Keep FP32 normalization, positional encoding and softmax; only compute
+    # kernels receive half inputs. Reuse half values across adjacent kernels.
+    used = {name for node in original_nodes for name in (*node.input, *node.output)}
+    used.update(types)
+    def unique(base):
+        name = base
+        while name in used:
+            name += '_'
+        used.add(name)
+        return name
+
+    def as_half(name):
+        if name not in half:
+            target = unique(name + '_fp16')
+            if name in initializers:
+                data = numpy_helper.to_array(initializers[name]).astype(np.float16)
+                weights.append(numpy_helper.from_array(data, target))
+            else:
+                nodes.append(helper.make_node('Cast', [name], [target], to=TensorProto.FLOAT16))
+            half[name] = target
+        return half[name]
+
+    converted = 0
+    for node in original_nodes:
+        if (node.domain not in ('', 'ai.onnx') or node.op_type not in ops
+                or node.name in blocked or len(node.output) != 1
+                or types.get(node.output[0]) != TensorProto.FLOAT
+                or any(types.get(name) != TensorProto.FLOAT for name in node.input if name)):
+            nodes.append(node)
+            continue
+        out = node.output[0]
+        for i, name in enumerate(node.input):
+            if name:
+                node.input[i] = as_half(name)
+        target = unique(out + '_fp16')
+        node.output[0] = target
+        half[out] = target
+        nodes.append(node)
+        nodes.append(helper.make_node('Cast', [target], [out], to=TensorProto.FLOAT))
+        converted += 1
+
+    # Drop unused FP32 casts and weights while retaining graph outputs.
+    live = {v.name for v in graph.output}
+    retained = []
+    for node in reversed(nodes):
+        if node.op_type != 'Cast' or any(name in live for name in node.output):
+            retained.append(node)
+            live.update(node.input)
+    del graph.node[:]
+    graph.node.extend(reversed(retained))
+    kept_weights = [t for t in (*initializers.values(), *weights) if t.name in live]
+    del graph.initializer[:]
+    graph.initializer.extend(kept_weights)
+    # Rebuild inferred types for renamed values.
+    del graph.value_info[:]
     model = onnx.shape_inference.infer_shapes(model)
     onnx.checker.check_model(model)
     output.parent.mkdir(parents=True, exist_ok=True)
     onnx.save(model, str(output))
-    half_weights = sum(t.data_type == onnx.TensorProto.FLOAT16 for t in model.graph.initializer)
-    print(f'Mixed precision graph: {output}; {half_weights} FP16 initializers')
+    print(f'Mixed precision graph: {output}; {converted} FP16 compute nodes')
 
 
 def main():

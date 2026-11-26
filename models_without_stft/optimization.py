@@ -1,9 +1,4 @@
-# Adapted from MSST cleanup/vocal-inference-only utils/optimization.py (MIT).
-"""Opt-in, inference-only transforms after strict checkpoint loading.
-
-Packed weights replace (not duplicate) the original modules. Optimized models
-are runtime objects, not interchangeable training checkpoint formats.
-"""
+"""Spectral-core inference optimizations (adapted from MSST, MIT)."""
 from collections import defaultdict
 
 import torch
@@ -12,8 +7,7 @@ from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval
 
 
-# Bound temporary activations: a full stack of all frequency-band MLPs can
-# consume hundreds of MB more than the original serial implementation.
+# Group equal-width bands to limit temporary activations.
 def _groups(keys, group_size):
     groups = defaultdict(list)
     for index, key in enumerate(keys):
@@ -57,8 +51,6 @@ class _BandGroup(nn.Module):
 
     def forward(self, splits):
         x = torch.stack([splits[i] for i in self.indices])
-        # Retain the exact F.normalize epsilon, per-band statistics, and
-        # multiplication order, including under autocast.
         gamma = self.gamma.reshape(self.gamma.shape[0], *([1] * (x.ndim - 2)), self.gamma.shape[1])
         x = F.normalize(x, dim=-1) * self.scale * gamma
         return self.linear(x)
@@ -86,16 +78,12 @@ class _MaskGroup(nn.Module):
     def __init__(self, indices, nets):
         super().__init__()
         self.indices = indices
-        # Both retained implementations have Linear/Tanh alternating,
-        # but their MLP depth conventions differ. Read actual layers.
         layers = []
         for position, layer in enumerate(nets[0][0]):
             if type(layer) is nn.Linear:
                 layers.append(PackedLinear([net[0][position] for net in nets]))
-            elif type(layer) is nn.Tanh:
-                layers.append(nn.Tanh())
             else:
-                raise ValueError(f'Unexpected mask layer: {type(layer).__name__}')
+                layers.append(nn.Tanh())
         layers.append(nn.GLU(dim=-1))
         self.net = nn.Sequential(*layers)
 
@@ -140,39 +128,18 @@ def _fuse_qkv_gate(attn):
 
 
 def _fuse_sequential_bn(model):
-    """Only fuse proven adjacent pairs in standard Sequential forward paths.
-
-    In particular, do not infer adjacency from registration order in arbitrary
-    MaxViT blocks, or fold normalization subclasses containing activations.
-    """
-    counts = defaultdict(int)
-    for _, module in model.named_modules(remove_duplicate=False):
-        counts[id(module)] += 1
+    """Fold adjacent Conv2d/BatchNorm2d pairs."""
     total = 0
-    for parent in list(model.modules()):
+    for parent in model.modules():
         if not isinstance(parent, nn.Sequential) or type(parent).forward is not nn.Sequential.forward:
             continue
         keys = list(parent._modules)
         for a, b in zip(keys, keys[1:]):
-            first, bn = parent._modules[a], parent._modules[b]
-            if counts[id(first)] != 1 or counts[id(bn)] != 1:
-                continue
-            if any(m._forward_hooks or m._forward_pre_hooks for m in (first, bn)):
-                continue
-            if first.training or bn.training or not getattr(bn, 'track_running_stats', False):
-                continue
-            if getattr(bn, 'running_mean', None) is None or getattr(bn, 'running_var', None) is None:
-                continue
-            if type(first) is nn.Conv2d and type(bn) is nn.BatchNorm2d and first.out_channels == bn.num_features:
-                fused = fuse_conv_bn_eval(first, bn)
-            else:
-                # Linear+BN1d needs proof of the normalization axis;
-                # ConvTranspose groups need separate handling. Skip both
-                # rather than guess from matching feature counts.
-                continue
-            parent._modules[a] = fused
-            parent._modules[b] = nn.Identity()
-            total += 1
+            conv, bn = parent._modules[a], parent._modules[b]
+            if type(conv) is nn.Conv2d and type(bn) is nn.BatchNorm2d and bn.track_running_stats:
+                parent._modules[a] = fuse_conv_bn_eval(conv, bn)
+                parent._modules[b] = nn.Identity()
+                total += 1
     return total
 
 
@@ -185,17 +152,17 @@ def optimize_model(model, model_type, *, mode='safe', group_size=4):
         raise ValueError('group_size must be positive')
     if mode == 'off' or getattr(model, '_inference_optimized', False):
         return model, []
-    if any(m.training for m in model.modules()):
-        raise ValueError('Inference optimization requires model.eval()')
+    model.eval()
     report = []
     if model_type in ('bs_roformer', 'mel_band_roformer', 'bs_polarformer'):
         from models_without_stft.roformer_common import Attention, BandSplit, MaskEstimator
         count = 0
         for module in list(model.modules()):
-            if type(module) is Attention and module.pope_embed is None:
-                _fuse_qkv_gate(module)
-                module.attend.use_matmul = True
-                count += 1
+            if type(module) is Attention:
+                if module.pope_embed is None:
+                    _fuse_qkv_gate(module)
+                    module.attend.use_matmul = True
+                    count += 1
         if count:
             report.append(f'QKV+Gate / MatMul attention: {count}')
         if type(model.band_split) is BandSplit:
@@ -216,4 +183,21 @@ def optimize_model(model, model_type, *, mode='safe', group_size=4):
     if count:
         report.append(f'Dropout identities: {count}')
     model._inference_optimized = True
-    return model.eval(), report
+    return model, report
+
+
+@torch.no_grad()
+def prepare_positions(model, frames, *, static_time):
+    """Prepare shared frequency-axis and optional time-axis position tables."""
+    from models_without_stft.roformer_common import prepare_rotary
+    from models_without_stft.bs_polarformer_no_stft import prepare_pope
+
+    bands = len(model.band_split.dim_inputs)
+    for transformer, length in zip(model.layers[0], (frames if static_time else None, bands)):
+        attention = transformer.layers[0][0]
+        if attention.pope_embed is not None:
+            if length is not None:
+                prepare_pope(attention.pope_embed, length)
+        else:
+            prepare_rotary(attention.rotary_embed, length)
+

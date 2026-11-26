@@ -8,6 +8,33 @@ from einops import rearrange
 from models_without_stft.bs_polarformer_no_stft import pope_attention
 
 
+def rotary_tables(embed, length):
+    positions = torch.arange(length, device=embed.freqs.device, dtype=embed.freqs.dtype)
+    phase = (positions[:, None] / embed.interpolate_factor) * embed.freqs[None, :]
+    phase = phase.repeat_interleave(2, dim=-1)
+    return phase.cos(), phase.sin()
+
+
+def prepare_rotary(embed, length):
+    embed.cache_if_possible = False
+    if length is not None:
+        cos, sin = rotary_tables(embed, length)
+        embed.register_buffer('export_cos', cos, persistent=False)
+        embed.register_buffer('export_sin', sin, persistent=False)
+
+
+def rotate(q, k, embed):
+    if hasattr(embed, 'export_cos'):
+        cos, sin = embed.export_cos, embed.export_sin
+    else:
+        cos, sin = rotary_tables(embed, q.shape[-2])
+    def apply(x):
+        a, b = x[..., ::2], x[..., 1::2]
+        half = torch.stack((-b, a), dim=-1).flatten(-2)
+        return x * cos + half * sin
+    return apply(q), apply(k)
+
+
 class Attend(nn.Module):
     def __init__(self, dropout=0.):
         super().__init__()
@@ -17,7 +44,7 @@ class Attend(nn.Module):
     def forward(self, q, k, v):
         scale = q.shape[-1] ** -0.5
         if self.use_matmul:
-            sim = torch.matmul(q, k.transpose(-1, -2)) * scale
+            sim = torch.matmul(q * scale, k.transpose(-1, -2))
             return torch.matmul(self.attn_dropout(sim.softmax(dim=-1)), v)
         sim = einsum('b h i d, b h j d -> b h i j', q, k) * scale
         attn = self.attn_dropout(sim.softmax(dim=-1))
@@ -97,8 +124,7 @@ class Attention(Module):
         if self.pope_embed is not None:
             out = pope_attention(q, k, v, self.pope_embed, self.scale)
         else:
-            q = self.rotary_embed.rotate_queries_or_keys(q)
-            k = self.rotary_embed.rotate_queries_or_keys(k)
+            q, k = rotate(q, k, self.rotary_embed)
             out = self.attend(q, k, v)
 
         out = out * rearrange(gates, 'b n h -> b h n 1').sigmoid()

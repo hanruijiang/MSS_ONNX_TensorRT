@@ -1,6 +1,6 @@
 # MSS ONNX — Vocal separation
 
-Vocal separation inference with ONNX Runtime (CPU or CUDA). ONNX Runtime executes the neural network core; STFT, mask application and iSTFT run in PyTorch. Existing ONNX graphs require no checkpoint or model architecture dependencies. PyTorch model definitions are retained for checkpoint-to-ONNX export.
+Vocal separation inference with ONNX Runtime (CPU, CUDA or Native WebGPU). ONNX Runtime executes the neural network core; STFT, mask application and iSTFT run in PyTorch. Inference uses ONNX models; checkpoint and model architecture dependencies are needed only for export.
 
 ## Models
 
@@ -22,7 +22,9 @@ pip install -r requirements-onnx.txt  # CPU ONNX Runtime
 pip install -r requirements.txt onnxruntime-gpu
 # For checkpoint-to-ONNX export with CPU ORT validation:
 pip install -r requirements-export.txt
-# OR, if using GPU ORT instead:
+# Native WebGPU:
+pip install -r requirements-onnx.txt onnxruntime-ep-webgpu
+# Export tools with CUDA ORT:
 pip install -r requirements.txt "onnx>=1.16" onnxruntime-gpu
 ```
 
@@ -35,13 +37,13 @@ For ONNX export, additionally install **only** the selected model's architecture
 | BS Roformer / MelBand Roformer | `pip install rotary-embedding-torch==0.3.5` |
 | BS PolarFormer | None |
 
-For PolarFormer ONNX export, install `onnxscript` for the Dynamo exporter. Segm Models installs `timm==0.9.2` and torchvision through its pinned architecture dependency; use torchvision compatible with PyTorch. Existing ONNX graphs do not require model extras.
+For PolarFormer export, install `onnxscript`. Segm Models requires a torchvision build compatible with PyTorch.
 
 For CUDA, ensure PyTorch, CUDA, cuDNN and ONNX Runtime are compatible. See the [inference guide](docs/inference.md).
 
 ## Inference
 
-Use the published [FP32 ONNX](https://huggingface.co/bgkb/bs_polarformer/resolve/main/bs_polarformer.onnx) or [FP16-weight ONNX](https://huggingface.co/bgkb/bs_polarformer/resolve/main/bs_polarformer_fp16.onnx), not the WebGPU variants.
+Use an exported spectral-core ONNX model. A [published PolarFormer FP32 graph](https://huggingface.co/bgkb/bs_polarformer/resolve/main/bs_polarformer.onnx) is also available.
 
 ```bash
 mkdir -p weights input
@@ -53,7 +55,7 @@ python inference.py --model_type bs_polarformer \
   --onnx_model_path weights/bs_polarformer.onnx --force_cpu
 ```
 
-For other models substitute the preset, model type and ONNX path. Omit `--force_cpu` to use CUDA when available. `--onnx_model_path` is required; no backend selection flag is needed.
+Select `--provider cpu`, `cuda` or `webgpu`. The default `auto` selects CUDA when available, otherwise CPU.
 
 ## ONNX export
 
@@ -68,9 +70,9 @@ PolarFormer defaults to opset 18; other models default to opset 17. Export loads
 
 See the [inference guide](docs/inference.md) for chunk and batch settings, precision, audio output and tensor shapes.
 
-## Experimental Native WebGPU optimization
+## Native WebGPU optimization
 
-See [Native WebGPU spectral-core pipeline](docs/native_webgpu.md) for safe export, portable graph optimization, mixed precision conversion, Native WebGPU I/O binding, capture and validation. These are opt-in; existing CPU/CUDA commands are unchanged.
+See the [Native WebGPU guide](docs/native_webgpu.md) for safe export, graph optimization, FP16 conversion, I/O binding, graph capture and benchmarking.
 
 ## Tests
 

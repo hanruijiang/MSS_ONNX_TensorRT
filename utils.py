@@ -82,9 +82,7 @@ class ONNXBackend:
             provider = device.type
         if provider != 'webgpu' and (graph_capture or io_binding or strict_webgpu):
             raise ValueError('WebGPU options require provider=webgpu')
-        self.provider = provider
         self._binding = None
-        self._use_binding = io_binding or graph_capture
         providers = ['CPUExecutionProvider']
         if provider == 'cuda':
             if 'CUDAExecutionProvider' not in ort.get_available_providers():
@@ -112,7 +110,7 @@ class ONNXBackend:
         self.fixed_batch = self.input.shape[0] if isinstance(self.input.shape[0], int) else None
         if self.fixed_batch is not None and self.fixed_batch < 1:
             raise ValueError('ONNX fixed batch must be positive')
-        if self._use_binding:
+        if io_binding or graph_capture:
             from webgpu_runtime import StaticBinding
             self._binding = StaticBinding(self.session, self.input, self.output, self.dtypes)
 

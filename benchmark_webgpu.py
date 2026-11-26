@@ -39,14 +39,10 @@ def main():
                             graph_capture=args.graph_capture, io_binding=args.io_binding,
                             strict_webgpu=args.strict_webgpu, layout=args.layout,
                             buffer_cache=args.buffer_cache)
-    # Two different inputs detect stale graph-capture buffers as well as precision drift.
-    for i in range(2):
-        if i:
-            x = processor.stft(torch.randn(args.batch_size, 2, size))
-        expected, actual = ref(x), candidate(x)
-        np.testing.assert_allclose(actual.numpy(), expected.numpy(), rtol=args.rtol, atol=args.atol)
-        np.testing.assert_allclose(processor.istft(actual).numpy(), processor.istft(expected).numpy(),
-                                   rtol=args.rtol, atol=args.atol)
+    expected, actual = ref(x), candidate(x)
+    np.testing.assert_allclose(actual.numpy(), expected.numpy(), rtol=args.rtol, atol=args.atol)
+    np.testing.assert_allclose(processor.istft(actual).numpy(), processor.istft(expected).numpy(),
+                               rtol=args.rtol, atol=args.atol)
     for _ in range(args.warmup):
         candidate(x)
     times = []

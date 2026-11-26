@@ -9,16 +9,17 @@ All five models use 44.1 kHz stereo. Mono input is duplicated to stereo. Outputs
 | MelBand Roformer | B × selected band-frequency-channel entries × T × 2 | per-band masks, averaged across overlapping bands |
 | BS PolarFormer | B × T × 4100, `stft_features` | B × 1 × 2050 × T × 2, `mask` |
 
-PolarFormer uses 2048 FFT/window, 512 hop, periodic Hann, centered STFT, unnormalized, frequency-major stereo interleaving. The complex mask multiplies the original spectrum; DC is zeroed by default in each channel for all three Roformer presets before iSTFT with explicit waveform length (`model.zero_dc` overrides this). The default chunk is 882000 samples (1723 frames), overlap 2, batch 1. The FP16-weight Hugging Face graph keeps FP32 external IO; it does not imply FP16 computation throughout the graph.
+PolarFormer uses 2048 FFT/window, 512 hop, periodic Hann, centered STFT, unnormalized, frequency-major stereo interleaving. The complex mask multiplies the original spectrum; DC is zeroed by default in each channel for all three Roformer presets before iSTFT with explicit waveform length (`model.zero_dc` overrides this). The default chunk is 882000 samples (1723 frames), overlap 2, batch 1.
 
 ## Runtime selection
 
-- `--onnx_model_path ...` (required): ONNX Runtime is the only inference backend, using CPU or CUDA Execution Provider. No checkpoint/model construction. CUDA requests require successful CUDA provider initialization; ordinary per-node CPU fallback may still occur.
+- `--onnx_model_path`: FP32 or mixed-precision spectral-core ONNX model.
+- `--provider`: `auto`, `cpu`, `cuda`, or `webgpu`. See the [Native WebGPU guide](native_webgpu.md) for graph capture and I/O binding.
 - `--device_id`: selects a single CUDA device (default 0); `--force_cpu` selects CPU.
 - `--use_tta`: channel swap and polarity averaging for ONNX inference; slower.
 - `--chunk_size`, `--batch_size`: override inference settings. Static ONNX axes must match the spectral input shape. For fixed-batch graphs, the graph batch size overrides the configured batch size and the final batch is padded. Dynamic-batch graphs use the configured batch size. Input rank and static dimensions are checked before processing audio; supported external IO is FP32 or FP16.
 
-The Rotary cores use explicit attention; PolarFormer uses scaled dot-product attention with PoPE positional encoding. Chunk tails longer than half a chunk use reflection padding; shorter tails use zero padding. For ONNX export, checkpoint loading accepts raw state dicts and `state`, `state_dict`, or `model_state_dict` wrappers, strips `module.` and `_orig_mod.` prefixes, and remains strict with `weights_only=True`.
+Roformer uses RoPE attention; PolarFormer uses PoPE with its original attention scale. Chunk tails longer than half a chunk use reflection padding; shorter tails use zero padding.
 
 ## Memory and precision
 
