@@ -38,9 +38,9 @@ def export_model_to_onnx(config, model, model_type, output_path, opset_version=N
     with torch.no_grad():
         expected = model(x).detach().cpu().numpy()
         model, report = optimize_model(model, model_type, mode=optimization, group_size=group_size)
-        if roformer and optimization == 'safe':
+        if roformer and (dynamic or optimization == 'safe'):
             frames = x.shape[2] if model_type == 'mel_band_roformer' else x.shape[1]
-            prepare_positions(model, frames, static_time=not dynamic)
+            prepare_positions(model, frames, static_time=not dynamic, precompute=optimization == 'safe')
         print('Structural optimization:', report)
         if polar:
             torch.onnx.export(model, (x,), output_path, input_names=[names[0]], output_names=[names[1]],

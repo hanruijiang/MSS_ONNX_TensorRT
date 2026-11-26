@@ -63,7 +63,7 @@ Select `--provider cpu`, `cuda` or `webgpu`. The default `auto` selects CUDA whe
 python export_to_onnx.py --model_type bs_roformer \
   --config_path configs/viperx/model_bs_roformer_ep_317_sdr_12.9755.yaml \
   --checkpoint_path weights/model_bs_roformer_ep_317_sdr_12.9755.ckpt \
-  --output_path weights/bs_roformer.onnx --force_cpu
+  --output_path weights/bs_roformer.onnx --optimization safe --force_cpu
 ```
 
 PolarFormer defaults to opset 18; other models default to opset 17. Export loads the checkpoint strictly and compares the output with ONNX Runtime.

@@ -24,6 +24,7 @@ def main():
     p.add_argument('--graph_capture', action='store_true')
     p.add_argument('--io_binding', action='store_true')
     p.add_argument('--strict_webgpu', action='store_true')
+    p.add_argument('--profile', action='store_true', help='Save ORT kernel profile')
     p.add_argument('--rtol', type=float, default=1e-2)
     p.add_argument('--atol', type=float, default=1e-3)
     args = p.parse_args()
@@ -38,7 +39,7 @@ def main():
     candidate = ONNXBackend(args.model, 'cpu', provider=args.provider,
                             graph_capture=args.graph_capture, io_binding=args.io_binding,
                             strict_webgpu=args.strict_webgpu, layout=args.layout,
-                            buffer_cache=args.buffer_cache)
+                            buffer_cache=args.buffer_cache, profile=args.profile)
     expected, actual = ref(x), candidate(x)
     np.testing.assert_allclose(actual.numpy(), expected.numpy(), rtol=args.rtol, atol=args.atol)
     np.testing.assert_allclose(processor.istft(actual).numpy(), processor.istft(expected).numpy(),
@@ -54,7 +55,8 @@ def main():
                       'chunk_size': size, 'batch': args.batch_size, 'input_shape': list(x.shape),
                       'layout': args.layout, 'capture': args.graph_capture, 'io_binding': args.io_binding or args.graph_capture,
                       'p50_ms': float(np.percentile(times, 50)), 'p95_ms': float(np.percentile(times, 95)),
-                      'runs': args.runs}, indent=2))
+                      'runs': args.runs,
+                      'profile': candidate.session.end_profiling() if args.profile else None}, indent=2))
 
 
 if __name__ == '__main__':

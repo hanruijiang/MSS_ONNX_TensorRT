@@ -83,7 +83,7 @@ class _MaskGroup(nn.Module):
             if type(layer) is nn.Linear:
                 layers.append(PackedLinear([net[0][position] for net in nets]))
             else:
-                layers.append(nn.Tanh())
+                layers.append(layer)
         layers.append(nn.GLU(dim=-1))
         self.net = nn.Sequential(*layers)
 
@@ -158,11 +158,10 @@ def optimize_model(model, model_type, *, mode='safe', group_size=4):
         from models_without_stft.roformer_common import Attention, BandSplit, MaskEstimator
         count = 0
         for module in list(model.modules()):
-            if type(module) is Attention:
-                if module.pope_embed is None:
-                    _fuse_qkv_gate(module)
-                    module.attend.use_matmul = True
-                    count += 1
+            if type(module) is Attention and module.pope_embed is None:
+                _fuse_qkv_gate(module)
+                module.attend.use_matmul = True
+                count += 1
         if count:
             report.append(f'QKV+Gate / MatMul attention: {count}')
         if type(model.band_split) is BandSplit:
@@ -187,13 +186,14 @@ def optimize_model(model, model_type, *, mode='safe', group_size=4):
 
 
 @torch.no_grad()
-def prepare_positions(model, frames, *, static_time):
+def prepare_positions(model, frames, *, static_time, precompute=True):
     """Prepare shared frequency-axis and optional time-axis position tables."""
     from models_without_stft.roformer_common import prepare_rotary
     from models_without_stft.bs_polarformer_no_stft import prepare_pope
 
     bands = len(model.band_split.dim_inputs)
-    for transformer, length in zip(model.layers[0], (frames if static_time else None, bands)):
+    lengths = (frames if static_time and precompute else None, bands if precompute else None)
+    for transformer, length in zip(model.layers[0], lengths):
         attention = transformer.layers[0][0]
         if attention.pope_embed is not None:
             if length is not None:

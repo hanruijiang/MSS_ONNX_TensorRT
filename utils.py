@@ -73,7 +73,8 @@ def load_core(model_type, config, checkpoint):
 
 class ONNXBackend:
     def __init__(self, path, device, *, provider='auto', graph_capture=False,
-                 io_binding=False, layout='NCHW', buffer_cache='bucket', strict_webgpu=False):
+                 io_binding=False, layout='NCHW', buffer_cache='bucket', strict_webgpu=False,
+                 profile=False):
         import onnxruntime as ort
         device = torch.device(device)
         if provider not in ('auto', 'cpu', 'cuda', 'webgpu'):
@@ -91,7 +92,11 @@ class ONNXBackend:
         if provider == 'webgpu':
             from webgpu_runtime import create_session
             self.session = create_session(path, layout=layout, cache=buffer_cache,
-                                          capture=graph_capture, strict=strict_webgpu)
+                                          capture=graph_capture, strict=strict_webgpu, profile=profile)
+        elif profile:
+            options = ort.SessionOptions()
+            options.enable_profiling = True
+            self.session = ort.InferenceSession(str(path), sess_options=options, providers=providers)
         else:
             self.session = ort.InferenceSession(str(path), providers=providers)
         if provider == 'cuda':

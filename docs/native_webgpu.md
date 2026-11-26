@@ -29,13 +29,13 @@ python convert_onnx_precision.py --input weights/bs_optimized_fp32.onnx --output
   chunk lengths compatible with their encoder/decoder strides and windows.
 
 ORT BASIC performs constant folding and graph cleanup, followed by ONNX shape
-inference. Native WebGPU applies session-level attention and layout optimizations.
+inference. Native WebGPU can apply additional session-level fusions and layout optimizations.
 PolarFormer keeps Q/K head dimension 128, V dimension 64 and scale 1/sqrt(64)
 for the supplied preset.
 
-Mixed precision converts Conv, ConvTranspose, MatMul, Gemm and supported activation
-kernels to FP16; graph I/O, normalization, softmax and positional encoding remain
-FP32. Use `--keep_op` or `--keep_node` to keep selected compute kernels in FP32.
+Mixed precision converts Conv, ConvTranspose, MatMul, Gemm, bias additions and
+selected activation kernels to FP16. Graph I/O, normalization, softmax and the
+position tables remain FP32. Use `--keep_op` or `--keep_node` to keep selected compute kernels in FP32.
 
 ## Inference
 
@@ -70,6 +70,7 @@ python benchmark_webgpu.py --model_type bs_roformer \
 
 Reports warm p50/p95 core latency including GPU transfers and compares the
 spectral and reconstructed waveform outputs with FP32. Compare chunk size, batch
-size, precision, capture and NCHW/NHWC on the target adapter.
+size, precision, capture and NCHW/NHWC on the target adapter. Use `--profile`
+to inspect attention kernels, layout transforms and CPU fallback in the ORT profile.
 
 [Native WebGPU EP](https://onnxruntime.ai/docs/execution-providers/WebGPU-ExecutionProvider.html)

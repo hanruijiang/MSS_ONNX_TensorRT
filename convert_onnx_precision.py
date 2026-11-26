@@ -23,6 +23,7 @@ def convert_precision(source, output, *, blocked_ops=(), blocked_nodes=()):
     ops = FP16_OPS - set(blocked_ops)
     blocked = set(blocked_nodes)
     nodes, half, weights = [], {}, []
+    generated_casts = set()
     original_nodes = list(graph.node)
     # Keep FP32 normalization, positional encoding and softmax; only compute
     # kernels receive half inputs. Reuse half values across adjacent kernels.
@@ -43,12 +44,16 @@ def convert_precision(source, output, *, blocked_ops=(), blocked_nodes=()):
                 weights.append(numpy_helper.from_array(data, target))
             else:
                 nodes.append(helper.make_node('Cast', [name], [target], to=TensorProto.FLOAT16))
+                generated_casts.add(target)
             half[name] = target
         return half[name]
 
     converted = 0
     for node in original_nodes:
-        if (node.domain not in ('', 'ai.onnx') or node.op_type not in ops
+        bias_add = (node.op_type == 'Add' and 'Add' not in blocked_ops
+                    and any(name in half for name in node.input)
+                    and any(name in initializers for name in node.input))
+        if (node.domain not in ('', 'ai.onnx') or (node.op_type not in ops and not bias_add)
                 or node.name in blocked or len(node.output) != 1
                 or types.get(node.output[0]) != TensorProto.FLOAT
                 or any(types.get(name) != TensorProto.FLOAT for name in node.input if name)):
@@ -63,13 +68,14 @@ def convert_precision(source, output, *, blocked_ops=(), blocked_nodes=()):
         half[out] = target
         nodes.append(node)
         nodes.append(helper.make_node('Cast', [target], [out], to=TensorProto.FLOAT))
+        generated_casts.add(out)
         converted += 1
 
     # Drop unused FP32 casts and weights while retaining graph outputs.
-    live = {v.name for v in graph.output}
+    live = {v.name for v in (*graph.input, *graph.output)}
     retained = []
     for node in reversed(nodes):
-        if node.op_type != 'Cast' or any(name in live for name in node.output):
+        if not (node.op_type == 'Cast' and node.output[0] in generated_casts) or any(name in live for name in node.output):
             retained.append(node)
             live.update(node.input)
     del graph.node[:]

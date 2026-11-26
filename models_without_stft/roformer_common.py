@@ -16,6 +16,7 @@ def rotary_tables(embed, length):
 
 
 def prepare_rotary(embed, length):
+    embed.export_rotary = True
     embed.cache_if_possible = False
     if length is not None:
         cos, sin = rotary_tables(embed, length)
@@ -124,7 +125,11 @@ class Attention(Module):
         if self.pope_embed is not None:
             out = pope_attention(q, k, v, self.pope_embed, self.scale)
         else:
-            q, k = rotate(q, k, self.rotary_embed)
+            if getattr(self.rotary_embed, 'export_rotary', False):
+                q, k = rotate(q, k, self.rotary_embed)
+            else:
+                q = self.rotary_embed.rotate_queries_or_keys(q)
+                k = self.rotary_embed.rotate_queries_or_keys(k)
             out = self.attend(q, k, v)
 
         out = out * rearrange(gates, 'b n h -> b h n 1').sigmoid()
