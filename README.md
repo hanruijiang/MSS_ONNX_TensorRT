@@ -68,6 +68,10 @@ PolarFormer defaults to opset 18; other models default to opset 17. Export loads
 
 See the [inference guide](docs/inference.md) for chunk and batch settings, precision, audio output and tensor shapes.
 
+## Experimental Native WebGPU optimization
+
+See [Native WebGPU spectral-core pipeline](docs/native_webgpu.md) for safe export, portable graph optimization, mixed precision conversion, Native WebGPU I/O binding, capture and validation. These are opt-in; existing CPU/CUDA commands are unchanged.
+
 ## Tests
 
 ```bash

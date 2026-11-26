@@ -72,16 +72,31 @@ def load_core(model_type, config, checkpoint):
 
 
 class ONNXBackend:
-    def __init__(self, path, device):
+    def __init__(self, path, device, *, provider='auto', graph_capture=False,
+                 io_binding=False, layout='NCHW', buffer_cache='bucket', strict_webgpu=False):
         import onnxruntime as ort
         device = torch.device(device)
+        if provider not in ('auto', 'cpu', 'cuda', 'webgpu'):
+            raise ValueError('Unknown ONNX provider')
+        if provider == 'auto':
+            provider = device.type
+        if provider != 'webgpu' and (graph_capture or io_binding or strict_webgpu):
+            raise ValueError('WebGPU options require provider=webgpu')
+        self.provider = provider
+        self._binding = None
+        self._use_binding = io_binding or graph_capture
         providers = ['CPUExecutionProvider']
-        if device.type == 'cuda':
+        if provider == 'cuda':
             if 'CUDAExecutionProvider' not in ort.get_available_providers():
                 raise RuntimeError('CUDA provider unavailable; install onnxruntime-gpu or use --force_cpu')
             providers.insert(0, ('CUDAExecutionProvider', {'device_id': device.index or 0}))
-        self.session = ort.InferenceSession(str(path), providers=providers)
-        if device.type == 'cuda':
+        if provider == 'webgpu':
+            from webgpu_runtime import create_session
+            self.session = create_session(path, layout=layout, cache=buffer_cache,
+                                          capture=graph_capture, strict=strict_webgpu)
+        else:
+            self.session = ort.InferenceSession(str(path), providers=providers)
+        if provider == 'cuda':
             if 'CUDAExecutionProvider' not in self.session.get_providers():
                 raise RuntimeError('ONNX Runtime failed to initialize CUDAExecutionProvider')
             self.session.disable_fallback()
@@ -97,6 +112,9 @@ class ONNXBackend:
         self.fixed_batch = self.input.shape[0] if isinstance(self.input.shape[0], int) else None
         if self.fixed_batch is not None and self.fixed_batch < 1:
             raise ValueError('ONNX fixed batch must be positive')
+        if self._use_binding:
+            from webgpu_runtime import StaticBinding
+            self._binding = StaticBinding(self.session, self.input, self.output, self.dtypes)
 
     def validate_shape(self, shape):
         if len(shape) != len(self.input.shape) or any(
@@ -108,8 +126,9 @@ class ONNXBackend:
     def __call__(self, x):
         self.validate_shape(tuple(x.shape))
         values = x.detach().cpu().numpy().astype(self.dtypes[self.input.type], copy=False)
-        out = self.session.run(None, {self.input.name: values})[0]
-        return torch.from_numpy(out).to(x.device)
+        out = (self._binding.run(values) if self._binding is not None else
+               self.session.run(None, {self.input.name: values})[0])
+        return torch.from_numpy(out).to(device=x.device, dtype=torch.float32)
 
 
 @torch.inference_mode()
