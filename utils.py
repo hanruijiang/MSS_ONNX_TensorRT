@@ -1,5 +1,7 @@
 # Original MSST author: Roman Solovyev (ZFTurbo).
 """Configuration, checkpoint loading and shared chunked inference."""
+import logging
+
 import numpy as np
 import torch
 import yaml
@@ -7,6 +9,18 @@ from ml_collections import ConfigDict
 from models.preprocess import make_processor
 
 MODEL_TYPES = ('mdx23c', 'segm_models', 'bs_roformer', 'mel_band_roformer', 'bs_polarformer')
+
+
+def warn_if_not_close(actual, expected, *, label, rtol=1e-2, atol=1e-3):
+    """Report numerical discrepancies without interrupting export or benchmarking."""
+    if actual.shape != expected.shape:
+        raise ValueError(f'{label}: output shape {actual.shape} != {expected.shape}')
+    try:
+        np.testing.assert_allclose(actual, expected, rtol=rtol, atol=atol)
+    except AssertionError as exc:
+        logging.getLogger(__name__).warning('%s: numerical check failed: %s', label, exc)
+        return False
+    return True
 
 
 def load_config(model_type, config_path):

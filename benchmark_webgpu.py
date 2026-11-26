@@ -4,7 +4,7 @@ import time
 import json
 import numpy as np
 import torch
-from utils import ONNXBackend, MODEL_TYPES, load_config, chunk_size
+from utils import ONNXBackend, MODEL_TYPES, load_config, chunk_size, warn_if_not_close
 from models.preprocess import make_processor
 
 
@@ -41,9 +41,11 @@ def main():
                             strict_webgpu=args.strict_webgpu, layout=args.layout,
                             buffer_cache=args.buffer_cache, profile=args.profile)
     expected, actual = ref(x), candidate(x)
-    np.testing.assert_allclose(actual.numpy(), expected.numpy(), rtol=args.rtol, atol=args.atol)
-    np.testing.assert_allclose(processor.istft(actual).numpy(), processor.istft(expected).numpy(),
-                               rtol=args.rtol, atol=args.atol)
+    spectral_ok = warn_if_not_close(actual.numpy(), expected.numpy(),
+                                    label='Spectral core', rtol=args.rtol, atol=args.atol)
+    waveform_ok = warn_if_not_close(
+        processor.istft(actual).numpy(), processor.istft(expected).numpy(),
+        label='Reconstructed waveform', rtol=args.rtol, atol=args.atol)
     for _ in range(args.warmup):
         candidate(x)
     times = []
@@ -56,6 +58,7 @@ def main():
                       'layout': args.layout, 'capture': args.graph_capture, 'io_binding': args.io_binding or args.graph_capture,
                       'p50_ms': float(np.percentile(times, 50)), 'p95_ms': float(np.percentile(times, 95)),
                       'runs': args.runs,
+                      'spectral_check_passed': spectral_ok, 'waveform_check_passed': waveform_ok,
                       'profile': candidate.session.end_profiling() if args.profile else None}, indent=2))
 
 

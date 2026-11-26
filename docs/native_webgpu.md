@@ -28,6 +28,9 @@ python convert_onnx_precision.py --input weights/bs_optimized_fp32.onnx --output
 - `--chunk_size`, `--batch_size`: export dimensions. Convolution models require
   chunk lengths compatible with their encoder/decoder strides and windows.
 
+Numerical tolerance mismatches during export and benchmarking produce warnings;
+shape mismatches and model execution errors still stop execution.
+
 ORT BASIC performs constant folding and graph cleanup, followed by ONNX shape
 inference. Native WebGPU can apply additional session-level fusions and layout optimizations.
 PolarFormer keeps Q/K head dimension 128, V dimension 64 and scale 1/sqrt(64)

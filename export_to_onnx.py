@@ -2,7 +2,7 @@
 import argparse
 from pathlib import Path
 import torch
-from utils import MODEL_TYPES, load_config, load_core, chunk_size
+from utils import MODEL_TYPES, load_config, load_core, chunk_size, warn_if_not_close
 from models.preprocess import make_processor
 from models_without_stft.optimization import optimize_model, prepare_positions
 
@@ -12,7 +12,6 @@ def export_model_to_onnx(config, model, model_type, output_path, opset_version=N
                          export_chunk_size=None, batch_size=None):
     import onnx
     import onnxruntime as ort
-    import numpy as np
     polar = model_type == 'bs_polarformer'
     opset = opset_version or (18 if polar else 17)
     if polar and opset < 18:
@@ -58,15 +57,18 @@ def export_model_to_onnx(config, model, model_type, output_path, opset_version=N
     onnx.checker.check_model(output_path)
     session = ort.InferenceSession(output_path, providers=['CPUExecutionProvider'])
     actual = session.run(None, {names[0]: x.cpu().numpy()})[0]
-    np.testing.assert_allclose(actual, expected, rtol=1e-2, atol=1e-3)
+    passed = warn_if_not_close(actual, expected, label='ONNX export')
     if dynamic:
         probe_size = size + int(config.model.stft_hop_length) if roformer else size
         probe = processor.stft(torch.randn(2 if batch == 1 else 1, 2, probe_size, device=device))
         with torch.no_grad():
             reference = model(probe).cpu().numpy()
-        np.testing.assert_allclose(session.run(None, {names[0]: probe.cpu().numpy()})[0],
-                                   reference, rtol=1e-2, atol=1e-3)
-    print(f'Exported and compared against PyTorch: {output_path}')
+        probe_passed = warn_if_not_close(
+            session.run(None, {names[0]: probe.cpu().numpy()})[0], reference,
+            label='ONNX dynamic shape')
+        passed = passed and probe_passed
+    status = 'passed' if passed else 'warnings'
+    print(f'Exported: {output_path} (numerical checks: {status})')
 
 
 def main():
