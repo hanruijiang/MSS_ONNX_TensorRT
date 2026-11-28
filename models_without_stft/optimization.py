@@ -158,12 +158,12 @@ def optimize_model(model, model_type, *, mode='safe', group_size=4):
         from models_without_stft.roformer_common import Attention, BandSplit, MaskEstimator
         count = 0
         for module in list(model.modules()):
-            if type(module) is Attention and module.pope_embed is None:
+            if type(module) is Attention:
                 _fuse_qkv_gate(module)
-                module.attend.use_matmul = True
+                module.attend.use_matmul = module.pope_embed is None
                 count += 1
         if count:
-            report.append(f'QKV+Gate / MatMul attention: {count}')
+            report.append(f'QKV+Gate attention: {count}')
         if type(model.band_split) is BandSplit:
             model.band_split = PackedBandSplit(model.band_split, group_size).eval()
             report.append(f'BandSplit packed groups: {len(model.band_split.groups)}')

@@ -13,13 +13,9 @@ class ONNXInferenceTests(unittest.TestCase):
         self.args = dict(config_path='config.yaml', input_folder='input',
                          store_dir='output', onnx_model_path='model.onnx')
 
-    def test_onnx_is_the_default_and_only_backend(self):
-        args = parse_args(self.args)
-        self.assertEqual(args.onnx_model_path, 'model.onnx')
-        for option in ('use_onnx', 'use_tensorrt', 'use_compile',
-                       'tensorrt_model_path', 'start_check_point'):
-            with self.subTest(option=option), self.assertRaisesRegex(ValueError, 'Unknown inference arguments'):
-                parse_args(dict(self.args, **{option: True}))
+    def test_unknown_inference_argument(self):
+        with self.assertRaisesRegex(ValueError, 'Unknown inference arguments'):
+            parse_args(dict(self.args, unknown_option=True))
 
     def test_required_onnx_path(self):
         with self.assertRaisesRegex(ValueError, '--onnx_model_path is required'):
@@ -45,12 +41,16 @@ class ONNXInferenceTests(unittest.TestCase):
             session = session_factory.return_value
             session.get_inputs.return_value = [SimpleNamespace(name='x', type='tensor(float)', shape=[None, 4])]
             session.get_outputs.return_value = [SimpleNamespace(name='y', type='tensor(float)')]
-            session.run.side_effect = lambda _, inputs: [inputs['x']]
+            binding = session.io_binding.return_value
+            binding.get_outputs.return_value = [SimpleNamespace(numpy=lambda: np.ones((2, 4), dtype=np.float32))]
             backend = ONNXBackend('model.onnx', 'cpu')
             session_factory.assert_called_once_with('model.onnx', providers=['CPUExecutionProvider'])
             x = torch.ones(2, 4)
             torch.testing.assert_close(backend(x), x)
-            self.assertEqual(session.run.call_args.args[1]['x'].dtype, np.float32)
+            self.assertEqual(binding.bind_cpu_input.call_args.args[0], 'x')
+            self.assertEqual(binding.bind_cpu_input.call_args.args[1].dtype, np.float32)
+            binding.bind_output.assert_called_once_with('y')
+            session.run_with_iobinding.assert_called_once_with(binding)
             with self.assertRaises(ValueError):
                 backend.validate_shape((2, 5))
 

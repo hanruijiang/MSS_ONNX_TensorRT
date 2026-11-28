@@ -44,4 +44,9 @@ def pope_attention(q, k, v, pope_embed, scale):
     k = F.softplus(k)
     q = torch.stack([q * q_cos, q * q_sin], dim=-1).flatten(-2)
     k = torch.stack([k * k_cos, k * k_sin], dim=-1).flatten(-2)
+    if torch.onnx.is_in_onnx_export():
+        # Emit separate operations for the ONNX attention fusion pass.
+        pre_scale = math.sqrt(scale)
+        logits = (q * pre_scale) @ (k * pre_scale).transpose(-1, -2)
+        return logits.softmax(dim=-1) @ v
     return F.scaled_dot_product_attention(q, k, v, scale=scale)

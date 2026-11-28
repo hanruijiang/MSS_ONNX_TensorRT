@@ -35,7 +35,7 @@ class TFC_TDF(nn.Module):
         super().__init__()
 
         self.blocks = nn.ModuleList()
-        for i in range(l):
+        for _ in range(l):
             block = nn.Module()
 
             block.tfc1 = nn.Sequential(

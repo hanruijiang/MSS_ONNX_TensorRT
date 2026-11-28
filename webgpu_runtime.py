@@ -1,6 +1,5 @@
 """Native WebGPU sessions and reusable device buffers."""
 from threading import Lock
-import numpy as np
 
 _registration_lock = Lock()
 
@@ -33,29 +32,41 @@ def create_session(path, *, layout='NCHW', cache='bucket', capture=False, strict
     return session
 
 
-def static_shape(meta):
-    if not meta.shape or any(not isinstance(d, int) or d <= 0 for d in meta.shape):
-        raise ValueError('WebGPU fixed I/O binding requires static input and output shapes')
-    return tuple(meta.shape)
+def _static_shape(meta):
+    shape = tuple(meta.shape or ())
+    if shape and all(isinstance(dim, int) and dim > 0 for dim in shape):
+        return shape
+
+
+def create_binding(session, inp, out, dtypes, *, capture):
+    input_shape, output_shape = _static_shape(inp), _static_shape(out)
+    if not input_shape or not output_shape:
+        if capture:
+            raise ValueError('WebGPU graph capture requires static input and output shapes')
+        return None
+    if not hasattr(session, 'create_ortvalue_from_shape_and_type'):
+        if capture:
+            raise RuntimeError('WebGPU graph capture requires ONNX Runtime with session-owned OrtValue support')
+        return None
+    return StaticBinding(session, inp, out, dtypes, input_shape, output_shape)
 
 
 class StaticBinding:
     """One session-owned device input/output allocation per static spectral core."""
-    def __init__(self, session, inp, out, dtypes):
+    def __init__(self, session, inp, out, dtypes, input_shape, output_shape):
         self.session = session
-        self.shape = static_shape(inp)
-        output_shape = static_shape(out)
-        self.dtype = dtypes[inp.type]
+        self._lock = Lock()
         allocate = session.create_ortvalue_from_shape_and_type
-        self.input_value = allocate(self.shape, self.dtype, 'webgpu', 0)
+        self.input_value = allocate(input_shape, dtypes[inp.type], 'webgpu', 0)
         self.output_value = allocate(output_shape, dtypes[out.type], 'webgpu', 0)
         self.binding = session.io_binding()
         self.binding.bind_ortvalue_input(inp.name, self.input_value)
         self.binding.bind_ortvalue_output(out.name, self.output_value)
 
     def run(self, values):
-        self.input_value.update_inplace(np.ascontiguousarray(values, dtype=self.dtype))
-        self.binding.synchronize_inputs()
-        self.session.run_with_iobinding(self.binding)
-        self.binding.synchronize_outputs()
-        return self.binding.copy_outputs_to_cpu()[0]
+        with self._lock:
+            self.input_value.update_inplace(values)
+            self.binding.synchronize_inputs()
+            self.session.run_with_iobinding(self.binding)
+            self.binding.synchronize_outputs()
+            return self.binding.copy_outputs_to_cpu()[0]

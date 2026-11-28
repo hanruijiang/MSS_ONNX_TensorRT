@@ -18,9 +18,9 @@ python optimize_onnx.py --input weights/bs_safe_fp32.onnx --output weights/bs_op
 python convert_onnx_precision.py --input weights/bs_optimized_fp32.onnx --output weights/bs_optimized_fp16.onnx
 ```
 
-- `--optimization off|safe`: checkpoint-compatible export; safe packs bands and mask
-  estimators, merges BS/MelBand QKV and gate projections, folds Segm Conv-BN pairs,
-  removes dropout and precomputes fixed RoPE/PoPE tables.
+- `--optimization off|safe`: safe packs bands and mask estimators, merges Roformer
+  QKV and gate projections, folds Segm Conv-BN pairs, removes dropout and
+  precomputes fixed RoPE/PoPE tables.
 - `--group_size`: maximum equal-shape bands per packed MatMul (default 4).
 - `--shape_mode static|dynamic`: static shapes for graph capture; dynamic batch for
   all models and dynamic time for Roformers. Dynamic PolarFormer traces with
@@ -28,13 +28,8 @@ python convert_onnx_precision.py --input weights/bs_optimized_fp32.onnx --output
 - `--chunk_size`, `--batch_size`: export dimensions. Convolution models require
   chunk lengths compatible with their encoder/decoder strides and windows.
 
-Numerical tolerance mismatches during export and benchmarking produce warnings;
-shape mismatches and model execution errors still stop execution.
-
 ORT BASIC performs constant folding and graph cleanup, followed by ONNX shape
 inference. Native WebGPU can apply additional session-level fusions and layout optimizations.
-PolarFormer keeps Q/K head dimension 128, V dimension 64 and scale 1/sqrt(64)
-for the supplied preset.
 
 Mixed precision converts Conv, ConvTranspose, MatMul, Gemm, bias additions and
 selected activation kernels to FP16. Graph I/O, normalization, softmax and the
@@ -46,19 +41,16 @@ position tables remain FP32. Use `--keep_op` or `--keep_node` to keep selected c
 python inference.py --model_type bs_roformer \
   --config_path configs/viperx/model_bs_roformer_ep_317_sdr_12.9755.yaml \
   --input_folder input --store_dir output --onnx_model_path weights/bs_optimized_fp16.onnx \
-  --provider webgpu --webgpu_layout NCHW --webgpu_io_binding
+  --provider webgpu --webgpu_layout NCHW
 ```
 
-Select the FP32 or FP16 model using `--onnx_model_path`. Set the inference
-`--chunk_size` to match static exports. Use `--webgpu_graph_capture` for static
-graphs with WebGPU-supported compute kernels; it enables reusable device I/O binding.
-CPU STFT/iSTFT requires one upload and one readback per batch.
+Set `--chunk_size` to match a static export. Use `--webgpu_graph_capture` for
+static graphs that can run on WebGPU.
 
 | Option | Values |
 |---|---|
 | `--webgpu_layout` | NCHW, NHWC |
 | `--webgpu_buffer_cache` | bucket (default), simple, lazyRelease, disabled |
-| `--webgpu_io_binding` | Reuse static input and output device buffers |
 | `--webgpu_graph_capture` | Capture and replay fixed-shape inference |
 | `--webgpu_strict` | Disable CPU EP fallback |
 

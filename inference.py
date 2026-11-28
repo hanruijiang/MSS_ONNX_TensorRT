@@ -20,7 +20,6 @@ def parse_args(dict_args=None):
     parser.add_argument('--device_id', type=int, default=0, help='CUDA device index')
     parser.add_argument('--provider', choices=['auto', 'cpu', 'cuda', 'webgpu'], default='auto')
     parser.add_argument('--webgpu_graph_capture', action='store_true')
-    parser.add_argument('--webgpu_io_binding', action='store_true')
     parser.add_argument('--webgpu_strict', action='store_true')
     parser.add_argument('--webgpu_layout', choices=['NCHW', 'NHWC'], default='NCHW')
     parser.add_argument('--webgpu_buffer_cache', choices=['disabled', 'lazyRelease', 'simple', 'bucket'], default='bucket')
@@ -57,7 +56,7 @@ def proc_folder(dict_args=None):
     device = torch.device('cpu' if args.force_cpu or args.provider in ('cpu', 'webgpu')
                           or not torch.cuda.is_available() else f'cuda:{args.device_id}')
     model = ONNXBackend(args.onnx_model_path, device, provider=args.provider,
-                        graph_capture=args.webgpu_graph_capture, io_binding=args.webgpu_io_binding,
+                        graph_capture=args.webgpu_graph_capture,
                         strict_webgpu=args.webgpu_strict, layout=args.webgpu_layout,
                         buffer_cache=args.webgpu_buffer_cache)
     batch = inference_batch_size(config, model)
@@ -78,7 +77,7 @@ def proc_folder(dict_args=None):
             mix = np.stack([mix, mix])
         if mix.shape[0] != 2:
             raise ValueError(f'Expected mono or stereo audio: {path}')
-        original = mix.copy()
+        original = mix
         norm = None
         if config.inference.get('normalize', False):
             mix, norm = normalize_audio(mix)

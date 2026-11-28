@@ -12,7 +12,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--model_type', choices=MODEL_TYPES, required=True)
     p.add_argument('--config_path', required=True)
-    p.add_argument('--reference', required=True, help='Original FP32 ONNX (CPU)')
+    p.add_argument('--reference', required=True, help='FP32 reference ONNX (CPU)')
     p.add_argument('--model', required=True, help='Candidate ONNX')
     p.add_argument('--provider', choices=['cpu', 'webgpu'], default='webgpu')
     p.add_argument('--chunk_size', type=int)
@@ -22,7 +22,6 @@ def main():
     p.add_argument('--layout', choices=['NCHW', 'NHWC'], default='NCHW')
     p.add_argument('--buffer_cache', choices=['disabled', 'lazyRelease', 'simple', 'bucket'], default='bucket')
     p.add_argument('--graph_capture', action='store_true')
-    p.add_argument('--io_binding', action='store_true')
     p.add_argument('--strict_webgpu', action='store_true')
     p.add_argument('--profile', action='store_true', help='Save ORT kernel profile')
     p.add_argument('--rtol', type=float, default=1e-2)
@@ -37,7 +36,7 @@ def main():
     x = processor.stft(torch.randn(args.batch_size, 2, size))
     ref = ONNXBackend(args.reference, 'cpu', provider='cpu')
     candidate = ONNXBackend(args.model, 'cpu', provider=args.provider,
-                            graph_capture=args.graph_capture, io_binding=args.io_binding,
+                            graph_capture=args.graph_capture,
                             strict_webgpu=args.strict_webgpu, layout=args.layout,
                             buffer_cache=args.buffer_cache, profile=args.profile)
     expected, actual = ref(x), candidate(x)
@@ -55,7 +54,7 @@ def main():
         times.append((time.perf_counter() - start) * 1000)
     print(json.dumps({'model': args.model, 'providers': candidate.session.get_providers(),
                       'chunk_size': size, 'batch': args.batch_size, 'input_shape': list(x.shape),
-                      'layout': args.layout, 'capture': args.graph_capture, 'io_binding': args.io_binding or args.graph_capture,
+                      'layout': args.layout, 'capture': args.graph_capture, 'io_binding': True,
                       'p50_ms': float(np.percentile(times, 50)), 'p95_ms': float(np.percentile(times, 95)),
                       'runs': args.runs,
                       'spectral_check_passed': spectral_ok, 'waveform_check_passed': waveform_ok,

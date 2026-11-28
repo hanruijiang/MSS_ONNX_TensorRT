@@ -20,12 +20,12 @@ Python 3.10+; first install PyTorch for your CPU/CUDA platform.
 pip install -r requirements-onnx.txt  # CPU ONNX Runtime
 # OR for CUDA (do not install both ORT packages):
 pip install -r requirements.txt onnxruntime-gpu
-# For checkpoint-to-ONNX export with CPU ORT validation:
+# For checkpoint-to-ONNX export:
 pip install -r requirements-export.txt
 # Native WebGPU:
 pip install -r requirements-onnx.txt onnxruntime-ep-webgpu
 # Export tools with CUDA ORT:
-pip install -r requirements.txt "onnx>=1.16" onnxruntime-gpu
+pip install -r requirements.txt "torch>=2.10" "onnx>=1.18" onnxscript onnxruntime-gpu
 ```
 
 For ONNX export, additionally install **only** the selected model's architecture dependencies:
@@ -37,7 +37,7 @@ For ONNX export, additionally install **only** the selected model's architecture
 | BS Roformer / MelBand Roformer | `pip install rotary-embedding-torch==0.3.5` |
 | BS PolarFormer | None |
 
-For PolarFormer export, install `onnxscript`. Segm Models requires a torchvision build compatible with PyTorch.
+Segm Models requires a torchvision build compatible with PyTorch.
 
 For CUDA, ensure PyTorch, CUDA, cuDNN and ONNX Runtime are compatible. See the [inference guide](docs/inference.md).
 
@@ -66,7 +66,10 @@ python export_to_onnx.py --model_type bs_roformer \
   --output_path weights/bs_roformer.onnx --optimization safe --force_cpu
 ```
 
-PolarFormer defaults to opset 18; other models default to opset 17. Export loads the checkpoint strictly and compares the output with ONNX Runtime.
+All models use the Dynamo exporter. Choose the target for the full export pipeline with
+`--opset_version` (default 23). Standalone optimization and precision conversion inherit
+the input graph's opset. Pass `--opset_version` to either command to require a specific
+input opset. Standard Attention fusion is available from opset 23.
 
 See the [inference guide](docs/inference.md) for chunk and batch settings, precision, audio output and tensor shapes.
 
@@ -84,4 +87,4 @@ The tests cover configuration loading, PolarFormer feature ordering, complex mas
 
 ## Credits
 
-Original MSST: [ZFTurbo](https://github.com/ZFTurbo/Music-Source-Separation-Training) (Roman Solovyev); PolarFormer ONNX conversion and interface: [bgkb/bs_polarformer](https://huggingface.co/bgkb/bs_polarformer); Roformer and PoPE: [lucidrains](https://github.com/lucidrains). See [LICENSE](LICENSE) for license terms.
+MSST by [ZFTurbo](https://github.com/ZFTurbo/Music-Source-Separation-Training) (Roman Solovyev). PolarFormer ONNX conversion and interface by [bgkb/bs_polarformer](https://huggingface.co/bgkb/bs_polarformer). Roformer and PoPE by [lucidrains](https://github.com/lucidrains). See [LICENSE](LICENSE) for license terms.

@@ -11,7 +11,8 @@ from models_without_stft.bs_polarformer_no_stft import pope_attention
 def rotary_tables(embed, length):
     positions = torch.arange(length, device=embed.freqs.device, dtype=embed.freqs.dtype)
     phase = (positions[:, None] / embed.interpolate_factor) * embed.freqs[None, :]
-    phase = phase.repeat_interleave(2, dim=-1)
+    # Keep the time axis explicit for the TorchScript ONNX exporter.
+    phase = torch.stack((phase, phase), dim=-1).reshape(length, 2 * phase.shape[-1])
     return phase.cos(), phase.sin()
 
 
