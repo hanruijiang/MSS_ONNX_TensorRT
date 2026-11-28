@@ -20,15 +20,33 @@ class PoPE(nn.Module):
         self.bias = nn.Parameter(torch.zeros(heads, dim))
 
 
-def pope_attention(q, k, v, pope_embed, scale):
-    pos = torch.arange(q.shape[-2], device=q.device, dtype=q.dtype)
-    freqs = torch.einsum('i,j->ij', pos, pope_embed.inv_freqs.to(q.dtype))
-    bias = pope_embed.bias.detach().to(q.dtype).clamp(-2.0 * math.pi, 0.0)
-    freqs_q = freqs.unsqueeze(0).unsqueeze(0)
-    freqs_k = (freqs.unsqueeze(0) + bias.unsqueeze(1)).unsqueeze(0)
+def pope_tables(embed, length):
+    pos = torch.arange(length, device=embed.inv_freqs.device, dtype=embed.inv_freqs.dtype)
+    freqs = pos[:, None] * embed.inv_freqs[None, :]
+    bias = embed.bias.detach().clamp(-2.0 * math.pi, 0.0)
+    q = freqs[None, None, :, :]
+    k = (freqs[None, :, :] + bias[:, None, :])[None, :, :, :]
+    return q.cos(), q.sin(), k.cos(), k.sin()
 
+
+def prepare_pope(embed, length):
+    for name, value in zip(('q_cos', 'q_sin', 'k_cos', 'k_sin'), pope_tables(embed, length)):
+        embed.register_buffer(name, value, persistent=False)
+
+
+def pope_attention(q, k, v, pope_embed, scale):
+    if hasattr(pope_embed, 'q_cos'):
+        q_cos, q_sin, k_cos, k_sin = (pope_embed.q_cos, pope_embed.q_sin,
+                                      pope_embed.k_cos, pope_embed.k_sin)
+    else:
+        q_cos, q_sin, k_cos, k_sin = pope_tables(pope_embed, q.shape[-2])
     q = F.softplus(q)
     k = F.softplus(k)
-    q = torch.stack([q * freqs_q.cos(), q * freqs_q.sin()], dim=-1).flatten(-2)
-    k = torch.stack([k * freqs_k.cos(), k * freqs_k.sin()], dim=-1).flatten(-2)
+    q = torch.stack([q * q_cos, q * q_sin], dim=-1).flatten(-2)
+    k = torch.stack([k * k_cos, k * k_sin], dim=-1).flatten(-2)
+    if torch.onnx.is_in_onnx_export():
+        # Emit separate operations for the ONNX attention fusion pass.
+        pre_scale = math.sqrt(scale)
+        logits = (q * pre_scale) @ (k * pre_scale).transpose(-1, -2)
+        return logits.softmax(dim=-1) @ v
     return F.scaled_dot_product_attention(q, k, v, scale=scale)

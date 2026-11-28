@@ -1,6 +1,6 @@
 # MSS ONNX — Vocal separation
 
-Vocal separation inference with ONNX Runtime (CPU or CUDA). ONNX Runtime executes the neural network core; STFT, mask application and iSTFT run in PyTorch. Existing ONNX graphs require no checkpoint or model architecture dependencies. PyTorch model definitions are retained for checkpoint-to-ONNX export.
+Vocal separation inference with ONNX Runtime (CPU, CUDA or Native WebGPU). ONNX Runtime executes the neural network core; STFT, mask application and iSTFT run in PyTorch. Inference uses ONNX models; checkpoint and model architecture dependencies are needed only for export.
 
 ## Models
 
@@ -20,10 +20,12 @@ Python 3.10+; first install PyTorch for your CPU/CUDA platform.
 pip install -r requirements-onnx.txt  # CPU ONNX Runtime
 # OR for CUDA (do not install both ORT packages):
 pip install -r requirements.txt onnxruntime-gpu
-# For checkpoint-to-ONNX export with CPU ORT validation:
+# For checkpoint-to-ONNX export:
 pip install -r requirements-export.txt
-# OR, if using GPU ORT instead:
-pip install -r requirements.txt "onnx>=1.16" onnxruntime-gpu
+# Native WebGPU:
+pip install -r requirements-onnx.txt onnxruntime-ep-webgpu
+# Export tools with CUDA ORT:
+pip install -r requirements.txt "torch>=2.10" "onnx>=1.18" onnxscript onnxruntime-gpu
 ```
 
 For ONNX export, additionally install **only** the selected model's architecture dependencies:
@@ -35,13 +37,13 @@ For ONNX export, additionally install **only** the selected model's architecture
 | BS Roformer / MelBand Roformer | `pip install rotary-embedding-torch==0.3.5` |
 | BS PolarFormer | None |
 
-For PolarFormer ONNX export, install `onnxscript` for the Dynamo exporter. Segm Models installs `timm==0.9.2` and torchvision through its pinned architecture dependency; use torchvision compatible with PyTorch. Existing ONNX graphs do not require model extras.
+Segm Models requires a torchvision build compatible with PyTorch.
 
 For CUDA, ensure PyTorch, CUDA, cuDNN and ONNX Runtime are compatible. See the [inference guide](docs/inference.md).
 
 ## Inference
 
-Use the published [FP32 ONNX](https://huggingface.co/bgkb/bs_polarformer/resolve/main/bs_polarformer.onnx) or [FP16-weight ONNX](https://huggingface.co/bgkb/bs_polarformer/resolve/main/bs_polarformer_fp16.onnx), not the WebGPU variants.
+Use an exported spectral-core ONNX model. A [published PolarFormer FP32 graph](https://huggingface.co/bgkb/bs_polarformer/resolve/main/bs_polarformer.onnx) is also available.
 
 ```bash
 mkdir -p weights input
@@ -53,7 +55,7 @@ python inference.py --model_type bs_polarformer \
   --onnx_model_path weights/bs_polarformer.onnx --force_cpu
 ```
 
-For other models substitute the preset, model type and ONNX path. Omit `--force_cpu` to use CUDA when available. `--onnx_model_path` is required; no backend selection flag is needed.
+Select `--provider cpu`, `cuda` or `webgpu`. The default `auto` selects CUDA when available, otherwise CPU.
 
 ## ONNX export
 
@@ -61,12 +63,19 @@ For other models substitute the preset, model type and ONNX path. Omit `--force_
 python export_to_onnx.py --model_type bs_roformer \
   --config_path configs/viperx/model_bs_roformer_ep_317_sdr_12.9755.yaml \
   --checkpoint_path weights/model_bs_roformer_ep_317_sdr_12.9755.ckpt \
-  --output_path weights/bs_roformer.onnx --force_cpu
+  --output_path weights/bs_roformer.onnx --optimization safe --force_cpu
 ```
 
-PolarFormer defaults to opset 18; other models default to opset 17. Export loads the checkpoint strictly and compares the output with ONNX Runtime.
+All models use the Dynamo exporter. Choose the target for the full export pipeline with
+`--opset_version` (default 23). Standalone optimization and precision conversion inherit
+the input graph's opset. Pass `--opset_version` to either command to require a specific
+input opset. Standard Attention fusion is available from opset 23.
 
 See the [inference guide](docs/inference.md) for chunk and batch settings, precision, audio output and tensor shapes.
+
+## Native WebGPU optimization
+
+See the [Native WebGPU guide](docs/native_webgpu.md) for safe export, graph optimization, FP16 conversion, I/O binding, graph capture and benchmarking.
 
 ## Tests
 
@@ -78,4 +87,4 @@ The tests cover configuration loading, PolarFormer feature ordering, complex mas
 
 ## Credits
 
-Original MSST: [ZFTurbo](https://github.com/ZFTurbo/Music-Source-Separation-Training) (Roman Solovyev); PolarFormer ONNX conversion and interface: [bgkb/bs_polarformer](https://huggingface.co/bgkb/bs_polarformer); Roformer and PoPE: [lucidrains](https://github.com/lucidrains). See [LICENSE](LICENSE) for license terms.
+MSST by [ZFTurbo](https://github.com/ZFTurbo/Music-Source-Separation-Training) (Roman Solovyev). PolarFormer ONNX conversion and interface by [bgkb/bs_polarformer](https://huggingface.co/bgkb/bs_polarformer). Roformer and PoPE by [lucidrains](https://github.com/lucidrains). See [LICENSE](LICENSE) for license terms.
